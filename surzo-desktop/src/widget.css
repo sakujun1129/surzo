@@ -1,0 +1,120 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  background: transparent !important;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+}
+
+/* Window — pill centred at top, alert expands down into dock area */
+.wr {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  background: transparent;
+  padding-top: 4px;
+  -webkit-app-region: drag;
+}
+
+/* Pill — auto-sized to content, never stretched */
+.wp {
+  display: inline-flex;
+  flex-direction: column;
+  background: rgba(13, 13, 17, 0.90);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+  box-shadow: 0 2px 14px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.05);
+  transition:
+    border-radius 0.44s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow    0.44s ease;
+}
+
+.wp-open {
+  border-radius: 18px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.52), inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+/* Main row — always visible */
+.wrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 13px 5px 11px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.we { font-size: 13px; line-height: 1; flex-shrink: 0; }
+
+.ws {
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
+  flex-shrink: 0;
+}
+
+.wt {
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  margin-left: -3px;
+  align-self: flex-start;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.wg { width: 40px; height: 12px; flex-shrink: 0; display: block; }
+
+.wm {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.62);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+
+/* Alert area — expands below the main row, no visible separator */
+.wa {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition:
+    max-height 0.44s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity    0.28s ease;
+}
+
+.wa-show {
+  max-height: 44px;
+  opacity: 1;
+}
+
+/* Text phrase — iOS/macOS notification style */
+.wat {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.88);
+  letter-spacing: -0.01em;
+  line-height: 1;
+  padding: 7px 14px 12px;
+  white-space: nowrap;
+  text-align: center;
+  animation: phrase-up 0.38s 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes phrase-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

@@ -1,0 +1,5 @@
+{
+  "buildCommand": "npx vite build --base=/ --outDir=web-build",
+  "outputDirectory": "web-build",
+  "framework": "vite"
+}

@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root {
+  margin: 0; padding: 0;
+  min-height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+html { background: #fafaf9; }
+html.dark { background: #09090b; }
+body, #root { background: inherit; }
+
+/* Scrollbar */
+::-webkit-scrollbar       { width: 4px; }
+::-webkit-scrollbar-track { background: #e7e5e4; }
+::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 2px; }
+.dark ::-webkit-scrollbar-track { background: #18181b; }
+.dark ::-webkit-scrollbar-thumb { background: #3f3f46; }
+
+/* Range input */
+input[type=range] {
+  -webkit-appearance: none; appearance: none;
+  height: 4px; border-radius: 2px;
+  background: #e7e5e4; outline: none; cursor: pointer;
+}
+.dark input[type=range] { background: #3f3f46; }
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px; height: 18px;
+  border-radius: 50%; background: #86efac; cursor: pointer;
+}
+
+.window-drag { -webkit-app-region: drag; }
+.drag-bar { position: fixed; top: 0; left: 0; right: 0; height: 28px; -webkit-app-region: drag; z-index: 9999; pointer-events: none; }
+
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.35} }
+.anim-blink { animation: blink 1.8s ease-in-out infinite; }
+
+@keyframes fadein { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:none} }
+.fadein { animation: fadein .22s ease-out; }

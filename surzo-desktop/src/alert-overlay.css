@@ -1,0 +1,66 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  background: transparent !important;
+  overflow: hidden;
+}
+
+/* Expand from the pill at the bottom center */
+.ao {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 10, 13, 0.97);
+  display: flex;
+  align-items: flex-end;
+  padding: 0 9vw 13vh;
+  cursor: pointer;
+  /* Starting shape: pill at bottom center — matches widget position */
+  clip-path: inset(calc(100% - 56px) calc(50% - 108px) 0px calc(50% - 108px) round 999px);
+}
+
+.ao-in {
+  animation: ao-expand 0.55s cubic-bezier(0.76, 0, 0.24, 1) forwards;
+}
+
+.ao-out {
+  clip-path: inset(0% 0% 0% 0% round 0px);
+  animation: ao-collapse 0.42s cubic-bezier(0.76, 0, 0.24, 1) forwards;
+}
+
+@keyframes ao-expand {
+  to { clip-path: inset(0% 0% 0% 0% round 0px); }
+}
+
+@keyframes ao-collapse {
+  to { clip-path: inset(calc(100% - 56px) calc(50% - 108px) 0px calc(50% - 108px) round 999px); }
+}
+
+/* Large phrase — bottom left, editorial weight */
+.ao-phrase {
+  font-family: -apple-system, 'SF Pro Display', BlinkMacSystemFont, sans-serif;
+  font-size: clamp(56px, 10vw, 96px);
+  font-weight: 200;
+  color: rgba(255, 255, 255, 0.92);
+  letter-spacing: -0.03em;
+  line-height: 1;
+  opacity: 0;
+}
+
+.ao-phrase-in {
+  animation: phrase-rise 0.5s 0.28s cubic-bezier(0.25, 0, 0, 1) forwards;
+}
+
+.ao-phrase-out {
+  animation: phrase-fall 0.2s cubic-bezier(0.25, 0, 0, 1) forwards;
+}
+
+@keyframes phrase-rise {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes phrase-fall {
+  to { opacity: 0; transform: translateY(8px); }
+}

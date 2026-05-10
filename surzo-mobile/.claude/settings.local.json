@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(npx expo *)",
+      "Bash(brew install *)",
+      "Bash(pkill -f \"expo start\")",
+      "Bash(pkill -f \"metro\")"
+    ]
+  }
+}
