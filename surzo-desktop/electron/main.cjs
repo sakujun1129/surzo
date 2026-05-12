@@ -1414,7 +1414,7 @@ app.whenReady().then(() => {
   createWindow();
   setTimeout(probePermission, 1500);
   setTimeout(checkForUpdates, 6000);
-  setInterval(checkForUpdates, 60 * 60 * 1000); // re-check every hour
+  setInterval(checkForUpdates, 60 * 1000); // re-check every minute
 });
 
 app.on('window-all-closed', () => {
