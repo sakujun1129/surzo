@@ -1,14 +1,13 @@
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { supabase } from './supabase';
 import { getUserId } from './storage';
 
 // AppState: 'active' = Surzoが前面 = スマホ触ってない
 //           'background'/'inactive' = 他アプリ or 画面オフ = 触ってる
 export function startPhoneTracking(sessionId) {
-  let currentState = AppState.currentState;
-
   async function sendEvent(type) {
     const uid = await getUserId();
+    if (!uid) return;
     await supabase.from('phone_events').insert({
       user_id: uid,
       session_id: sessionId,
@@ -17,14 +16,25 @@ export function startPhoneTracking(sessionId) {
     });
   }
 
-  // 起動時点でバックグラウンドなら即送信
+  // Web: use visibilitychange directly (more reliable than AppState shim)
+  if (Platform.OS === 'web') {
+    const handler = () => {
+      sendEvent(document.hidden ? 'start' : 'end');
+    };
+    document.addEventListener('visibilitychange', handler);
+    if (document.hidden) sendEvent('start');
+    return () => document.removeEventListener('visibilitychange', handler);
+  }
+
+  // Native iOS/Android: use AppState
+  let currentState = AppState.currentState;
   if (currentState !== 'active') sendEvent('start');
 
   const sub = AppState.addEventListener('change', (nextState) => {
     if (currentState === 'active' && nextState !== 'active') {
-      sendEvent('start'); // スマホ触り始め
+      sendEvent('start');
     } else if (currentState !== 'active' && nextState === 'active') {
-      sendEvent('end'); // Surzoに戻った
+      sendEvent('end');
     }
     currentState = nextState;
   });

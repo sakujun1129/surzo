@@ -3,8 +3,10 @@ import {
   View, Text, TouchableOpacity, StyleSheet, SafeAreaView,
   Alert, ScrollView,
 } from 'react-native';
+import { router } from 'expo-router';
 import { supabase } from '../src/lib/supabase';
 import { getSessions } from '../src/lib/storage';
+import { Platform } from 'react-native';
 
 const CAT_ICONS = {
   Programming:'💻', Writing:'✍️', Design:'🎨', Research:'🔍',
@@ -60,11 +62,20 @@ export default function ProfileScreen() {
     });
   }, []);
 
-  const handleLogout = () => {
-    Alert.alert('ログアウト', 'ログアウトしますか？', [
-      { text: 'キャンセル', style: 'cancel' },
-      { text: 'ログアウト', style: 'destructive', onPress: () => supabase.auth.signOut() },
-    ]);
+  const handleLogout = async () => {
+    if (Platform.OS === 'web') {
+      if (!window.confirm('ログアウトしますか？')) return;
+      await supabase.auth.signOut();
+      router.replace('/pair');
+    } else {
+      Alert.alert('ログアウト', 'ログアウトしますか？', [
+        { text: 'キャンセル', style: 'cancel' },
+        { text: 'ログアウト', style: 'destructive', onPress: async () => {
+            await supabase.auth.signOut();
+            router.replace('/pair');
+          }},
+      ]);
+    }
   };
 
   return (

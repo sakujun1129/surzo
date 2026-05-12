@@ -5,10 +5,9 @@ html, body, #root {
   height: 100%;
   background: transparent !important;
   overflow: hidden;
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
 }
 
-/* Window — pill centred at top, alert expands down into dock area */
 .wr {
   width: 100%;
   height: 100%;
@@ -17,73 +16,119 @@ html, body, #root {
   justify-content: center;
   background: transparent;
   padding-top: 4px;
-  -webkit-app-region: drag;
 }
 
-/* Pill — auto-sized to content, never stretched */
+/* Main container */
 .wp {
   display: inline-flex;
   flex-direction: column;
-  background: rgba(13, 13, 17, 0.90);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 999px;
+  background: rgba(6, 6, 10, 0.54);
+  backdrop-filter: blur(36px) saturate(200%) brightness(1.06);
+  -webkit-backdrop-filter: blur(36px) saturate(200%) brightness(1.06);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-top-color: rgba(255, 255, 255, 0.13);
+  border-radius: 11px;
   overflow: hidden;
-  box-shadow: 0 2px 14px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.05);
+  box-shadow:
+    0 0 0 0.5px rgba(0,0,0,0.6),
+    0 4px 18px rgba(0,0,0,0.32),
+    0 1px 3px rgba(0,0,0,0.2),
+    inset 0 1px 0 rgba(255,255,255,0.05);
+  cursor: pointer;
   transition:
-    border-radius 0.44s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow    0.44s ease;
+    border-radius 0.38s cubic-bezier(0.22, 1, 0.36, 1),
+    background    0.38s ease,
+    box-shadow    0.38s ease,
+    transform     0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.wp.wp-dragging {
+  cursor: grabbing;
+  transform: scale(1.04);
+}
+
+.wp:active:not(.wp-dragging) {
+  transform: scale(0.97);
 }
 
 .wp-open {
-  border-radius: 18px;
-  box-shadow: 0 6px 24px rgba(0,0,0,0.52), inset 0 1px 0 rgba(255,255,255,0.06);
+  border-radius: 11px;
+  background: rgba(6, 6, 10, 0.68);
+  box-shadow:
+    0 0 0 0.5px rgba(0,0,0,0.7),
+    0 8px 28px rgba(0,0,0,0.40),
+    0 2px 6px rgba(0,0,0,0.24),
+    inset 0 1px 0 rgba(255,255,255,0.06);
 }
 
-/* Main row — always visible */
+/* Main row */
 .wrow {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 5px 13px 5px 11px;
+  padding: 5px 11px 5px 9px;
   flex-shrink: 0;
   white-space: nowrap;
 }
 
-.we { font-size: 13px; line-height: 1; flex-shrink: 0; }
+/* Zone arc indicator */
+.wz { flex-shrink: 0; display: block; }
 
+/* Score number */
 .ws {
-  font-size: 18px;
-  font-weight: 900;
+  font-size: 15px;
+  font-weight: 700;
   line-height: 1;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.5px;
+  letter-spacing: -0.4px;
   flex-shrink: 0;
 }
 
-.wt {
+/* Target score */
+.wtgt {
   font-size: 10px;
-  font-weight: 800;
+  font-weight: 600;
   line-height: 1;
-  margin-left: -3px;
+  margin-left: -4px;
+  opacity: 0.55;
+  flex-shrink: 0;
+  transition: color 0.4s ease, opacity 0.4s ease;
+}
+
+/* Trend arrow */
+.wt {
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  margin-left: -4px;
   align-self: flex-start;
-  margin-top: 2px;
+  margin-top: 1px;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+/* Sparkline */
+.wg { width: 36px; height: 10px; flex-shrink: 0; display: block; }
+
+/* Divider */
+.wdiv {
+  width: 1px;
+  height: 10px;
+  background: rgba(255,255,255,0.08);
   flex-shrink: 0;
 }
 
-.wg { width: 40px; height: 12px; flex-shrink: 0; display: block; }
-
+/* Timer */
 .wm {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.62);
+  color: rgba(255, 255, 255, 0.78);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.3px;
   flex-shrink: 0;
 }
 
-/* Alert area — expands below the main row, no visible separator */
+/* Alert area */
 .wa {
   max-height: 0;
   overflow: hidden;
@@ -91,30 +136,45 @@ html, body, #root {
   cursor: pointer;
   -webkit-app-region: no-drag;
   transition:
-    max-height 0.44s cubic-bezier(0.22, 1, 0.36, 1),
-    opacity    0.28s ease;
+    max-height 0.38s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity    0.24s ease;
 }
 
 .wa-show {
-  max-height: 44px;
+  max-height: 40px;
   opacity: 1;
 }
 
-/* Text phrase — iOS/macOS notification style */
 .wat {
   display: block;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.88);
-  letter-spacing: -0.01em;
+  color: rgba(255, 255, 255, 0.72);
+  letter-spacing: 0.01em;
   line-height: 1;
-  padding: 7px 14px 12px;
+  padding: 5px 12px 10px;
   white-space: nowrap;
   text-align: center;
-  animation: phrase-up 0.38s 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: phrase-up 0.32s 0.16s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @keyframes phrase-up {
-  from { opacity: 0; transform: translateY(6px); }
+  from { opacity: 0; transform: translateY(5px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* Light mode overrides */
+html:not(.dark) .wp {
+  background: rgba(235, 235, 240, 0.88);
+  border-color: rgba(0,0,0,0.09);
+  border-top-color: rgba(255,255,255,0.85);
+  box-shadow:
+    0 0 0 0.5px rgba(0,0,0,0.08),
+    0 4px 18px rgba(0,0,0,0.10),
+    0 1px 3px rgba(0,0,0,0.06),
+    inset 0 1px 0 rgba(255,255,255,0.7);
+}
+html:not(.dark) .wp-open { background: rgba(230,230,238,0.92); }
+html:not(.dark) .wm  { color: rgba(0,0,0,0.65); }
+html:not(.dark) .wdiv { background: rgba(0,0,0,0.12); }
+html:not(.dark) .wat  { color: rgba(0,0,0,0.7); }

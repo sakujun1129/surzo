@@ -2,60 +2,69 @@ import { useState } from 'react';
 import { CATEGORIES, CAT_ICON } from '../utils/categories.js';
 import { Card } from './ui.jsx';
 
-export default function StartSession({ onStart, onBack }) {
+export default function StartSession({ onStart, onBack, targetScore: initialTarget }) {
   const [title,          setTitle]    = useState('');
   const [category,       setCategory] = useState('Programming');
   const [plannedMinutes, setPlanned]  = useState(25);
   const [trackPhone,     setPhone]    = useState(true);
+  const [targetScore,    setTarget]   = useState(initialTarget ?? null);
 
   return (
-    <div className="h-screen bg-stone-50 dark:bg-zinc-950 text-stone-900 dark:text-white overflow-y-auto">
-      <div className="max-w-lg mx-auto px-4 pt-10 pb-8 fadein">
+    <div className="h-screen overflow-y-auto fadein" style={{ background: 'var(--bg-base)', color: 'var(--fg-base)' }}>
+      <div className="max-w-lg mx-auto px-4 pt-10 pb-8">
         <div className="pt-2 mb-6">
-          <button onClick={onBack} className="text-stone-400 dark:text-zinc-600 hover:text-stone-700 dark:hover:text-zinc-300 flex items-center gap-1 text-sm transition-colors">
-            ← Back
+          <button onClick={onBack}
+            className="flex items-center gap-1.5 text-sm transition-opacity hover:opacity-70"
+            style={{ color: 'var(--text-sub)' }}>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M8 2L4 6L8 10"/>
+            </svg>
+            Back
           </button>
         </div>
-        <h2 className="text-2xl font-black mb-5">New Session</h2>
 
-        <div className="space-y-3">
+        <h2 className="font-black mb-5" style={{ fontSize: 22, letterSpacing: '-0.4px' }}>New Session</h2>
+
+        <div className="space-y-2.5">
+          {/* Title */}
           <Card className="px-4 py-3">
-            <div className="text-stone-400 dark:text-zinc-500 text-xs uppercase tracking-widest mb-1.5">
-              Title <span className="normal-case text-stone-300 dark:text-zinc-700">(optional)</span>
-            </div>
+            <div className="sz-lbl mb-1.5">Title <span className="normal-case" style={{ color: 'var(--text-muted)', textTransform: 'none', letterSpacing: 0 }}>(optional)</span></div>
             <input
               type="text"
               value={title}
               onChange={e => setTitle(e.target.value)}
               placeholder={`e.g. "${category} deep work"`}
-              className="w-full bg-transparent text-stone-900 dark:text-white text-base placeholder-stone-300 dark:placeholder-zinc-700 outline-none"
+              className="w-full bg-transparent text-base outline-none"
+              style={{ color: 'var(--fg-base)', caretColor: 'var(--accent)' }}
             />
           </Card>
 
+          {/* Category */}
           <Card className="p-4">
-            <div className="text-stone-400 dark:text-zinc-500 text-xs uppercase tracking-widest mb-3">Category</div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="sz-lbl mb-3">Category</div>
+            <div className="grid grid-cols-2 gap-1.5">
               {CATEGORIES.map(cat => (
                 <button
                   key={cat}
                   onClick={() => setCategory(cat)}
-                  className={`flex items-center gap-2 px-3 py-2.5 rounded-2xl text-sm font-semibold transition-colors text-left ${
-                    category === cat
-                      ? 'bg-lime-300 text-zinc-950'
-                      : 'bg-stone-100 dark:bg-zinc-800 text-stone-600 dark:text-zinc-300 hover:bg-stone-200 dark:hover:bg-zinc-700'
-                  }`}
+                  className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all text-left"
+                  style={category === cat
+                    ? { background: 'var(--accent)', color: '#06060a' }
+                    : { background: 'rgba(255,255,255,0.04)', color: 'var(--text-sub)', border: '1px solid rgba(255,255,255,0.06)' }
+                  }
                 >
-                  <span className="text-base">{CAT_ICON[cat]}</span>
+                  <span style={{ fontSize: 14 }}>{CAT_ICON[cat]}</span>
                   <span>{cat}</span>
                 </button>
               ))}
             </div>
           </Card>
 
+          {/* Duration */}
           <Card className="p-4">
             <div className="flex justify-between items-baseline mb-3">
-              <div className="text-stone-400 dark:text-zinc-500 text-xs uppercase tracking-widest">Planned Duration</div>
-              <div className="font-bold tabular-nums text-sm">{plannedMinutes} min</div>
+              <div className="sz-lbl">Planned Duration</div>
+              <div className="font-bold tabular-nums text-sm" style={{ color: 'var(--accent)' }}>{plannedMinutes} min</div>
             </div>
             <input
               type="range" min={5} max={120} step={5}
@@ -63,28 +72,70 @@ export default function StartSession({ onStart, onBack }) {
               onChange={e => setPlanned(Number(e.target.value))}
               className="w-full"
             />
-            <div className="flex justify-between text-stone-300 dark:text-zinc-700 text-xs mt-2">
+            <div className="flex justify-between mt-2" style={{ fontSize: 10, color: 'var(--text-muted)' }}>
               <span>5m</span><span>30m</span><span>1h</span><span>1.5h</span><span>2h</span>
             </div>
           </Card>
 
+          {/* Phone tracking toggle */}
           <button
             onClick={() => setPhone(t => !t)}
-            className="w-full bg-white dark:bg-zinc-900/80 border border-stone-200 dark:border-white/[0.06] hover:bg-stone-50 dark:hover:bg-zinc-800/80 rounded-3xl px-4 py-3.5 flex items-center justify-between transition-colors"
+            className="w-full sz-card px-4 py-3.5 flex items-center justify-between transition-opacity hover:opacity-80"
           >
             <div className="text-left">
-              <div className="font-semibold text-sm">Track Phone Distractions</div>
-              <div className="text-stone-400 dark:text-zinc-500 text-xs mt-0.5">Log each time you check your phone</div>
+              <div className="font-semibold text-sm" style={{ color: 'var(--text)' }}>Track Phone Distractions</div>
+              <div className="text-xs mt-0.5" style={{ color: 'var(--text-sub)' }}>Log each time you check your phone</div>
             </div>
-            <div className={`w-11 h-6 rounded-full transition-colors relative flex-shrink-0 ml-4 ${trackPhone ? 'bg-lime-300' : 'bg-stone-200 dark:bg-zinc-700'}`}>
-              <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${trackPhone ? 'translate-x-5' : 'translate-x-0.5'}`} />
+            <div
+              className="relative flex-shrink-0 ml-4 transition-colors"
+              style={{
+                width: 40, height: 22, borderRadius: 999,
+                background: trackPhone ? 'var(--accent)' : 'var(--track-bg)',
+              }}>
+              <span
+                className="absolute top-0.5 w-[18px] h-[18px] rounded-full transition-transform"
+                style={{
+                  background: trackPhone ? '#06060a' : 'var(--text-sub)',
+                  transform: trackPhone ? 'translateX(20px)' : 'translateX(2px)',
+                }}
+              />
             </div>
           </button>
+
+          {/* Target score */}
+          <Card className="p-4">
+            <div className="flex justify-between items-baseline mb-3">
+              <div className="sz-lbl">Target Score</div>
+              {targetScore != null ? (
+                <button onClick={() => setTarget(null)}
+                  className="text-xs font-semibold hover:opacity-70" style={{ color: 'var(--text-muted)' }}>off</button>
+              ) : (
+                <button onClick={() => setTarget(70)}
+                  className="text-xs font-semibold hover:opacity-70" style={{ color: 'var(--accent)' }}>set</button>
+              )}
+            </div>
+            {targetScore != null ? (
+              <>
+                <div className="text-center mb-3">
+                  <span className="font-black tabular-nums" style={{ fontSize: 44, lineHeight: 1, color: 'var(--accent)' }}>{targetScore}</span>
+                </div>
+                <input type="range" min={40} max={95} step={1} value={targetScore}
+                  onChange={e => setTarget(Number(e.target.value))} className="w-full" />
+                <div className="flex justify-between mt-2" style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                  <span>40</span><span>55</span><span>70</span><span>85</span><span>95</span>
+                </div>
+                <div className="text-xs mt-2.5" style={{ color: 'var(--text-sub)' }}>これを下回ったらアラート</div>
+              </>
+            ) : (
+              <div className="text-sm" style={{ color: 'var(--text-muted)' }}>アラートなし</div>
+            )}
+          </Card>
         </div>
 
         <button
-          onClick={() => onStart({ title: title.trim() || category, category, plannedMinutes, trackPhone })}
-          className="w-full bg-lime-300 hover:bg-lime-200 active:scale-[.98] text-zinc-950 font-black text-lg py-4 rounded-3xl transition-all mt-4"
+          onClick={() => onStart({ title: title.trim() || category, category, plannedMinutes, trackPhone, targetScore })}
+          className="w-full sz-btn-primary mt-4"
+          style={{ paddingTop: 15, paddingBottom: 15, fontSize: 15 }}
         >
           Start
         </button>

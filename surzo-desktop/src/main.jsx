@@ -5,6 +5,10 @@ import Widget from './Widget.jsx';
 import AlertOverlay from './AlertOverlay.jsx';
 import './index.css';
 
+// Sync theme class before first render to avoid flash
+const _t = localStorage.getItem('surzo-theme') || 'dark';
+if (_t === 'dark') document.documentElement.classList.add('dark');
+
 const hash = window.location.hash;
 
 ReactDOM.createRoot(document.getElementById('root')).render(

@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, TouchableOpacity,
-  ScrollView, TextInput, AppState, ActivityIndicator, Alert, Image,
+  ScrollView, TextInput, AppState, ActivityIndicator, Alert, Image, Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Notifications from 'expo-notifications';
@@ -432,6 +432,7 @@ export default function TrackScreen() {
 
   // Register Expo push token for PC → mobile alerts
   useEffect(() => {
+    if (Platform.OS === 'web') return;
     async function register() {
       try {
         const { data: token } = await Notifications.getExpoPushTokenAsync();
@@ -470,7 +471,7 @@ export default function TrackScreen() {
         setPcSession(data ?? null);
         if (data && data.session_title !== prevTitle) {
           prevTitle = data.session_title;
-          Notifications.scheduleNotificationAsync({
+          if (Platform.OS !== 'web') Notifications.scheduleNotificationAsync({
             content: { title: 'PCセッション開始', body: `"${data.session_title}" が始まりました` },
             trigger: null,
           }).catch(() => {});
@@ -531,7 +532,7 @@ export default function TrackScreen() {
     const prev = prevPcScoreRef.current;
     const cur  = pcSession.score ?? 50;
     if (prev !== null && prev >= 20 && cur < 20) {
-      Notifications.scheduleNotificationAsync({
+      if (Platform.OS !== 'web') Notifications.scheduleNotificationAsync({
         content: {
           title: '⚠ PCの集中が切れています',
           body: `Work Score: ${cur} — 作業に戻りましょう`,
@@ -565,11 +566,13 @@ export default function TrackScreen() {
         if (checkPhoneRef.current) return;
         bgStartRef.current = Date.now();
         try {
-          const id = await Notifications.scheduleNotificationAsync({
-            content: { title: 'セッション中', body: '作業に戻りましょう 💪', sound: true },
-            trigger: { seconds: 120 },
-          });
-          notifIdRef.current = id;
+          if (Platform.OS !== 'web') {
+            const id = await Notifications.scheduleNotificationAsync({
+              content: { title: 'セッション中', body: '作業に戻りましょう 💪', sound: true },
+              trigger: { seconds: 120 },
+            });
+            notifIdRef.current = id;
+          }
         } catch (_e) {}
       } else {
         if (notifIdRef.current) {
@@ -596,7 +599,7 @@ export default function TrackScreen() {
     });
     return () => {
       sub.remove();
-      if (notifIdRef.current) {
+      if (notifIdRef.current && Platform.OS !== 'web') {
         Notifications.cancelScheduledNotificationAsync(notifIdRef.current).catch(() => {});
         notifIdRef.current = null;
       }

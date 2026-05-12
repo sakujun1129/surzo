@@ -1,24 +1,32 @@
 import { useState, useEffect, useRef } from 'react';
-import { fmtMin, fmtScore, scoreTextColor } from '../utils/format.js';
+import { fmtMin, fmtScore, scoreColor } from '../utils/format.js';
 import { CAT_ICON } from '../utils/categories.js';
 import { Card } from './ui.jsx';
 import { getSessionPhoto, subscribeSessionPhoto, getSessionPhotos, setCoverPhoto, uploadPhotoFromFile } from '../utils/storage.js';
+import ShareCardModal from './ShareCardModal.jsx';
 
 function buildShareText(session) {
   const icon = session.averageWorkScore >= 90 ? '🔥' : session.averageWorkScore >= 75 ? '⚡' : session.averageWorkScore >= 60 ? '💪' : '📊';
   return `${icon} Work Session — surzo\n\n"${session.title}"\n${fmtMin(session.durationMinutes)} · Score: ${session.averageWorkScore}\nDeep work: ${session.deepWorkBlocks ?? 0} blocks · Phone: ${session.phoneDistractionCount ?? 0}x\n\n#surzo #focusmode`;
 }
 
-function scoreColor(s) {
-  return s >= 70 ? '#d4f57a' : s >= 40 ? '#ffd60a' : '#ff453a';
+function getZoneLabel(s) {
+  if (s >= 85) return 'DEEP FOCUS';
+  if (s >= 70) return 'ON TRACK';
+  if (s >= 55) return 'FOCUSED';
+  if (s >= 38) return 'DRIFTING';
+  if (s >= 20) return 'OFF TASK';
+  return 'DISTRACTED';
+}
+
+function rgbaFromRgb(rgb, a) {
+  return rgb.replace('rgb(', 'rgba(').replace(')', `,${a})`);
 }
 
 function calcTotal(s) {
   const avg  = Math.round(s.averageWorkScore ?? 0);
   const mins = s.durationMinutes || 1;
-  const raw  = s.totalWorkScore;
-  if (!raw || raw < avg * mins) return Math.round(avg * mins * 60);
-  return raw;
+  return Math.round(avg * mins);
 }
 
 function smoothPath(pts) {
@@ -141,54 +149,95 @@ export default function SessionDetail({ session, onBack }) {
             className="text-sm text-stone-400 dark:text-zinc-600 hover:text-stone-700 dark:hover:text-zinc-300 transition-colors flex items-center gap-1">
             ← 戻る
           </button>
-          <div className="relative" style={{ WebkitAppRegion: 'no-drag' }}>
-            <button onClick={() => setShowShare(v => !v)}
-              className="flex items-center gap-1.5 bg-stone-100 hover:bg-stone-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-stone-700 dark:text-zinc-200 font-bold text-sm px-4 py-2 rounded-2xl transition-colors">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>
-              </svg>
-              共有
-            </button>
-            {showShare && (
-              <div className="absolute top-full right-0 mt-2 bg-white dark:bg-zinc-900 border border-stone-200 dark:border-zinc-800 rounded-3xl p-2 shadow-2xl w-52 z-50">
-                <button onClick={() => { handleShareCopy(); setShowShare(false); }}
-                  className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-stone-100 dark:hover:bg-zinc-800 text-sm font-semibold text-stone-700 dark:text-zinc-200 transition-colors">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-                  </svg>
-                  {copied ? '✓ コピー完了' : 'テキストをコピー'}
-                </button>
-                <button onClick={() => { window.electronAPI?.openExternal(`https://twitter.com/intent/tweet?text=${encodeURIComponent(buildShareText(session))}`); setShowShare(false); }}
-                  className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-stone-100 dark:hover:bg-zinc-800 text-sm font-semibold text-stone-700 dark:text-zinc-200 transition-colors">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.713 5.923zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
-                  </svg>
-                  X でシェア
-                </button>
-                <button onClick={() => { window.electronAPI?.openExternal(`https://www.threads.net/intent/post?text=${encodeURIComponent(buildShareText(session))}`); setShowShare(false); }}
-                  className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-stone-100 dark:hover:bg-zinc-800 text-sm font-semibold text-stone-700 dark:text-zinc-200 transition-colors">
-                  <svg width="14" height="14" viewBox="0 0 192 192" fill="currentColor">
-                    <path d="M141.537 88.988a66.667 66.667 0 00-2.518-1.143c-1.482-27.307-16.403-42.94-41.457-43.1h-.34c-14.986 0-27.449 6.396-35.12 18.036l13.779 9.452c5.73-8.695 14.724-10.548 21.348-10.548h.23c8.249.054 14.474 2.452 18.503 7.129 2.932 3.405 4.893 8.111 5.864 14.05-7.314-1.243-15.224-1.626-23.68-1.14-23.82 1.372-39.134 15.265-38.105 34.569.522 9.792 5.4 18.216 13.735 23.719 7.047 4.652 16.124 6.927 25.557 6.412 12.458-.683 22.231-5.436 29.049-14.127 5.178-6.6 8.453-15.153 9.899-25.93 5.937 3.583 10.337 8.298 12.767 13.966 4.132 9.635 4.373 25.468-8.546 38.318-11.319 11.24-24.955 16.109-45.488 16.256-22.788-.169-40.041-7.478-51.285-21.75C35.238 139.939 29.92 120.007 29.712 96c.208-24.007 5.526-43.939 15.791-59.249 11.244-14.271 28.497-21.58 51.285-21.75 22.748.17 40.56 7.514 53.04 21.836 6.253 7.001 10.609 15.93 13.203 26.498l16.168-4.312C176.65 48.25 171.04 37.04 163.07 28.018 148.002 11.274 126.31 2.15 96.1 2 65.96 2.15 44.002 11.299 28.74 28.086 15.266 43.054 8.344 63.966 8.1 96v.12c.244 32.034 7.166 52.946 20.64 67.914C44.002 180.821 65.96 190 96.1 190c27.736-.18 47.451-7.568 63.182-23.85 21.286-21.82 20.681-49.357 13.617-66.186-5.011-11.682-14.714-21.326-31.362-10.976z"/>
-                  </svg>
-                  Threads でシェア
-                </button>
-              </div>
-            )}
-          </div>
+          <button onClick={() => setShowShare(true)} style={{ WebkitAppRegion: 'no-drag' }}
+            className="flex items-center gap-1.5 bg-stone-100 hover:bg-stone-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-stone-700 dark:text-zinc-200 font-bold text-sm px-4 py-2 rounded-2xl transition-colors">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>
+            </svg>
+            共有
+          </button>
         </div>
 
-        {/* Photo section */}
-        <div className="mb-4">
-          {photoUrl && (
-            <div className="rounded-2xl overflow-hidden mb-2" style={{ aspectRatio: '3/4', maxHeight: 300 }}>
-              <img src={photoUrl} alt="" className="w-full h-full object-cover" />
+        {/* Hero — photo-or-glow background with HUGE score */}
+        {(() => {
+          const c = scoreColor(score);
+          const zone = getZoneLabel(score);
+          const pts = calcTotal(session);
+          return (
+            <div className="relative rounded-3xl overflow-hidden mb-3 shadow-2xl"
+              style={{
+                aspectRatio: photoUrl ? '4/5' : '5/4',
+                background: '#08080b',
+              }}>
+              {photoUrl ? (
+                <img src={photoUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
+              ) : (
+                <>
+                  <div className="absolute inset-0" style={{
+                    background: `radial-gradient(circle at 28% 30%, ${rgbaFromRgb(c, 0.38)} 0%, transparent 55%)`,
+                  }} />
+                  <div className="absolute inset-0" style={{
+                    background: `radial-gradient(circle at 85% 85%, ${rgbaFromRgb(c, 0.18)} 0%, transparent 50%)`,
+                  }} />
+                </>
+              )}
+
+              {/* Dark gradient overlay */}
+              <div className="absolute inset-0" style={{
+                background: photoUrl
+                  ? 'linear-gradient(180deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.05) 28%, rgba(0,0,0,0.30) 58%, rgba(0,0,0,0.92) 100%)'
+                  : 'linear-gradient(180deg, transparent 0%, transparent 45%, rgba(0,0,0,0.45) 100%)',
+              }} />
+
+              {/* Top meta: category · date */}
+              <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-5 pt-5">
+                <span className="text-white/85 text-xs font-bold flex items-center gap-1.5">
+                  <span>{CAT_ICON[session.category]}</span>
+                  <span>{session.category}</span>
+                </span>
+                <span className="text-white/55 text-[11px] font-semibold tabular-nums">{date}</span>
+              </div>
+
+              {/* Bottom block: title + HUGE score + zone */}
+              <div className="absolute bottom-0 left-0 right-0 px-5 pb-5">
+                <div className="text-white text-lg font-black leading-tight mb-0.5 line-clamp-2"
+                  style={{ letterSpacing: '-0.01em' }}>
+                  {session.title}
+                </div>
+                <div className="text-white/55 text-[11px] font-semibold mb-2 tabular-nums">
+                  {fmtMin(session.durationMinutes)} · {fmtScore(pts)} pts
+                </div>
+                <div className="flex items-end gap-3">
+                  <div className="font-black tabular-nums leading-[0.82]"
+                    style={{
+                      fontSize: 'clamp(96px, 30vw, 148px)',
+                      color: c,
+                      letterSpacing: '-0.06em',
+                      textShadow: photoUrl ? '0 4px 32px rgba(0,0,0,0.55)' : 'none',
+                    }}>
+                    {Math.round(score)}
+                  </div>
+                  <div className="pb-2 min-w-0">
+                    <div className="font-extrabold tracking-[2.5px] text-[10px]" style={{ color: c }}>
+                      {zone}
+                    </div>
+                    <div className="text-white/45 text-[9px] font-bold tracking-widest mt-0.5">
+                      WORK SCORE
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
-          )}
+          );
+        })()}
+
+        {/* Thumbnail strip + add photo */}
+        <div className="mb-5">
           <div className="flex gap-2 overflow-x-auto pb-1">
             {photos.map(p => (
               <button key={p.photo_url} onClick={() => handleSetCover(p.photo_url)}
                 className="relative flex-shrink-0 rounded-xl overflow-hidden transition-transform hover:scale-[1.02]"
-                style={{ width: 72, height: 96 }}>
+                style={{ width: 60, height: 80 }}>
                 <img src={p.photo_url} alt="" className="w-full h-full object-cover" />
                 {p.photo_url === photoUrl && (
                   <div className="absolute inset-0 ring-2 ring-lime-400 rounded-xl" />
@@ -200,7 +249,7 @@ export default function SessionDetail({ session, onBack }) {
             ))}
             <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
               className="relative flex-shrink-0 rounded-xl flex items-center justify-center bg-stone-100 dark:bg-zinc-800 hover:bg-stone-200 dark:hover:bg-zinc-700 transition-colors"
-              style={{ width: 72, height: 96 }}>
+              style={{ width: 60, height: 80 }}>
               {uploading
                 ? <div className="w-4 h-4 border-2 border-stone-300 border-t-lime-400 rounded-full animate-spin" />
                 : <span className="text-2xl text-stone-400 dark:text-zinc-500">+</span>}
@@ -210,26 +259,6 @@ export default function SessionDetail({ session, onBack }) {
             <p className="text-[10px] text-stone-400 dark:text-zinc-600 mt-1">★ でトップに使う写真を選択</p>
           )}
           <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleAddPhoto} />
-        </div>
-
-        {/* Hero */}
-        <div className="mb-6">
-          <div className="flex items-center gap-2 mb-2 text-stone-400 dark:text-zinc-600 text-sm">
-            <span>{CAT_ICON[session.category]}</span>
-            <span>{session.category}</span>
-            <span>·</span>
-            <span>{date}</span>
-          </div>
-          <h2 className="text-2xl font-black mb-4 leading-tight">{session.title}</h2>
-          <div className="flex items-end gap-4">
-            <div className={`text-[80px] font-black tabular-nums leading-none ${scoreTextColor(score)}`}>
-              {fmtScore(calcTotal(session))}
-            </div>
-            <div className="pb-3 text-stone-400 dark:text-zinc-600 text-sm">
-              <div className="font-semibold">{fmtMin(session.durationMinutes)}</div>
-              <div className="text-xs">avg {score}</div>
-            </div>
-          </div>
         </div>
 
         {/* Score line graph */}
@@ -265,31 +294,56 @@ export default function SessionDetail({ session, onBack }) {
           </Card>
         )}
 
-        {/* Reasons */}
+        {/* Good points */}
         {session.positiveReasons?.length > 0 && (
           <Card className="p-4 mb-3">
-            <div className="text-stone-400 dark:text-zinc-500 text-xs uppercase tracking-widest mb-3">良かった点</div>
-            <div className="space-y-2">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-5 h-5 rounded-md flex items-center justify-center"
+                style={{ background: 'rgba(212,245,122,0.15)', color: '#86b03d' }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+              </div>
+              <div className="text-xs uppercase tracking-widest font-bold" style={{ color: '#86b03d' }}>良かった点</div>
+            </div>
+            <div className="space-y-3">
               {session.positiveReasons.map((r, i) => (
-                <div key={i} className="flex gap-2 text-sm">
-                  <span className="text-lime-500 font-black">+</span>
-                  <span className="text-stone-700 dark:text-zinc-300 leading-snug">{r}</span>
+                <div key={i} className="flex gap-2.5 text-sm">
+                  <span className="font-black mt-px flex-shrink-0" style={{ color: '#86b03d' }}>+</span>
+                  <span className="leading-relaxed" style={{ color: 'var(--text)' }}>{r}</span>
                 </div>
               ))}
             </div>
-            {session.negativeReasons?.length > 0 && (
-              <div className="mt-3 pt-3 border-t border-stone-100 dark:border-zinc-800 space-y-2">
-                {session.negativeReasons.map((r, i) => (
-                  <div key={i} className="flex gap-2 text-sm">
-                    <span className="text-stone-400 dark:text-zinc-600">→</span>
-                    <span className="text-stone-400 dark:text-zinc-500 leading-snug">{r}</span>
-                  </div>
-                ))}
+          </Card>
+        )}
+
+        {/* Improvement points */}
+        {session.negativeReasons?.length > 0 && (
+          <Card className="p-4 mb-3">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-5 h-5 rounded-md flex items-center justify-center"
+                style={{ background: 'rgba(251,146,60,0.18)', color: '#fb923c' }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+                </svg>
               </div>
-            )}
+              <div className="text-xs uppercase tracking-widest font-bold" style={{ color: '#fb923c' }}>改善点</div>
+            </div>
+            <div className="space-y-3">
+              {session.negativeReasons.map((r, i) => (
+                <div key={i} className="flex gap-2.5 text-sm">
+                  <span className="font-black mt-px flex-shrink-0" style={{ color: '#fb923c' }}>→</span>
+                  <span className="leading-relaxed" style={{ color: 'var(--text-sub)' }}>{r}</span>
+                </div>
+              ))}
+            </div>
           </Card>
         )}
       </div>
+
+      {showShare && (
+        <ShareCardModal session={session} photoUrl={photoUrl} onClose={() => setShowShare(false)} />
+      )}
     </div>
   );
 }

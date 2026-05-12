@@ -1,19 +1,20 @@
 import { useState, useEffect, useRef } from 'react';
-import { fmtTimer, scoreTextColor } from '../utils/format.js';
+import { fmtTimer, scoreColor } from '../utils/format.js';
 import { CAT_ICON } from '../utils/categories.js';
 import { saveSession, setLiveSession, clearLiveSession, subscribePhoneEvents, updateLiveScore, sendMobileAlert, subscribeSessionPhoto, getSessionPhoto, getSessionPhotos, addSessionPhoto } from '../utils/storage.js';
 
 function getZone(score) {
-  if (score >= 85) return { label: 'DEEP FOCUS',  emoji: '🔥', color: 'text-lime-400',   bg: 'bg-lime-400/8'  };
-  if (score >= 70) return { label: 'ON TRACK',    emoji: '⚡', color: 'text-emerald-400', bg: 'bg-emerald-400/8' };
-  if (score >= 55) return { label: 'FOCUSED',     emoji: '✓',  color: 'text-sky-400',     bg: 'bg-sky-400/8'   };
-  if (score >= 38) return { label: 'DRIFTING',    emoji: '→',  color: 'text-yellow-400',  bg: 'bg-yellow-400/8' };
-  if (score >= 20) return { label: 'OFF TASK',    emoji: '⚠',  color: 'text-orange-400',  bg: 'bg-orange-400/8' };
-  return               { label: 'DISTRACTED',  emoji: '✕',  color: 'text-red-400',     bg: 'bg-red-400/8'   };
+  const color = scoreColor(score);
+  if (score >= 85) return { label: 'DEEP FOCUS', color, bg: 'rgba(96,165,250,0.05)'  };
+  if (score >= 70) return { label: 'ON TRACK',   color, bg: 'rgba(34,211,238,0.05)'  };
+  if (score >= 55) return { label: 'FOCUSED',    color, bg: 'rgba(52,211,153,0.05)'  };
+  if (score >= 38) return { label: 'DRIFTING',   color, bg: 'rgba(251,191,36,0.05)'  };
+  if (score >= 20) return { label: 'OFF TASK',   color, bg: 'rgba(251,146,60,0.05)'  };
+  return               { label: 'DISTRACTED', color, bg: 'rgba(244,63,94,0.05)'   };
 }
 
 function getNudge(score, prev) {
-  const rising = prev !== null && score > prev + 3;
+  const rising  = prev !== null && score > prev + 3;
   const falling = prev !== null && score < prev - 3;
   if (score >= 85) return rising ? 'You\'re in the zone — keep going.' : 'Deep focus. Don\'t break the streak.';
   if (score >= 70) return rising ? 'Good momentum, push further.' : 'Solid work. Lock in.';
@@ -24,13 +25,16 @@ function getNudge(score, prev) {
 }
 
 export default function ActiveSession({ sessionData, onEnd }) {
-  const [update, setUpdate]       = useState({ elapsed: 0, liveScore: 50, currentApp: '', phoneCount: 0, idleSecs: 0 });
-  const [prevScore, setPrevScore] = useState(null);
-  const [aiAnalysis, setAiAnalysis] = useState(null);
-  const [phoneActive, setPhoneActive] = useState(false);
+  const [update,       setUpdate]      = useState({ elapsed: 0, liveScore: 50, currentApp: '', phoneCount: 0, idleSecs: 0 });
+  const [prevScore,    setPrevScore]   = useState(null);
+  const [aiAnalysis,   setAiAnalysis]  = useState(null);
+  const [phoneActive,  setPhoneActive] = useState(false);
   const [sessionPhoto, setSessionPhoto] = useState(null);
   const scoreHistory   = useRef([]);
   const lastScoreWrite = useRef(0);
+  const lastPhoneCount = useRef(0);
+  const prevZoneRef    = useRef('');
+  const [zonePop, setZonePop] = useState(false);
 
   useEffect(() => {
     if (!window.electronAPI) return;
@@ -43,9 +47,12 @@ export default function ActiveSession({ sessionData, onEnd }) {
       if (scoreHistory.current.length > 30) scoreHistory.current.shift();
 
       const now = Date.now();
-      if (now - lastScoreWrite.current > 5000) {
+      const phoneChanged = data.phoneCount !== lastPhoneCount.current;
+      // Write immediately on phone_count change so mobile sees the new count fast
+      if (phoneChanged || now - lastScoreWrite.current > 5000) {
         updateLiveScore(data.liveScore, data.elapsed, data.currentApp, data.phoneCount);
         lastScoreWrite.current = now;
+        lastPhoneCount.current = data.phoneCount;
       }
     });
     return () => unsub?.();
@@ -72,6 +79,16 @@ export default function ActiveSession({ sessionData, onEnd }) {
   }, [sessionData?.id]);
 
   useEffect(() => {
+    const label = getZone(update.liveScore).label;
+    if (prevZoneRef.current && label !== prevZoneRef.current) {
+      setZonePop(true);
+      const t = setTimeout(() => setZonePop(false), 500);
+      return () => clearTimeout(t);
+    }
+    prevZoneRef.current = label;
+  }, [update.liveScore]);
+
+  useEffect(() => {
     if (!sessionData?.id) return;
     setLiveSession(sessionData.id, sessionData);
     const unsub = subscribePhoneEvents(sessionData.id, async (event) => {
@@ -93,7 +110,6 @@ export default function ActiveSession({ sessionData, onEnd }) {
   const trend    = prevScore !== null ? score - prevScore : 0;
   const isIdle   = update.idleSecs >= 30;
 
-  // Mini sparkline from history
   const hist = scoreHistory.current;
   const sparkPath = hist.length > 1 ? hist.map((v, i) => {
     const x = (i / (hist.length - 1)) * 100;
@@ -115,131 +131,137 @@ export default function ActiveSession({ sessionData, onEnd }) {
     if (phoneActive) await endPhone();
     const result = await window.electronAPI?.endSession();
     if (result) {
-      // Use already-received photo from Realtime, fall back to DB fetch
-      const photoUrl = sessionPhoto || await getSessionPhoto(result.id);
-      if (photoUrl?.startsWith('https://')) result.photoUri = photoUrl;
-      await saveSession(result);
-      // Ensure session_photo_gallery has the cover entry so mobile records pick it up
-      if (photoUrl?.startsWith('https://')) {
-        addSessionPhoto(result.id, photoUrl).catch(() => {});
-      }
+      try {
+        const photoUrl = sessionPhoto || await Promise.race([
+          getSessionPhoto(result.id),
+          new Promise(r => setTimeout(() => r(null), 4000)),
+        ]);
+        if (photoUrl?.startsWith('https://')) result.photoUri = photoUrl;
+        if (photoUrl?.startsWith('https://')) addSessionPhoto(result.id, photoUrl).catch(() => {});
+      } catch {}
+      saveSession(result).catch(() => {});
     }
     onEnd(result);
   };
 
   return (
-    <div className={`h-screen text-stone-900 dark:text-white overflow-y-auto transition-colors duration-700 ${zone.bg} bg-stone-50 dark:bg-zinc-950`}>
-      <div className="max-w-lg mx-auto px-4 pt-8 pb-8 fadein">
+    <div className="h-screen overflow-y-auto fadein" style={{ background: 'var(--bg-base)', color: 'var(--fg-base)' }}>
+      <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', background: zone.bg, transition: 'background 1s ease' }} />
+
+      <div className="max-w-lg mx-auto px-4 pt-8 pb-8" style={{ position: 'relative' }}>
 
         {/* Header */}
-        <div className="flex items-center justify-between mb-6 pt-2 window-drag">
+        <div className="flex items-center justify-between mb-7 pt-2 window-drag">
           <div className="flex items-center gap-2" style={{ WebkitAppRegion: 'no-drag' }}>
-            <span className="w-2 h-2 rounded-full bg-lime-400 anim-blink" />
-            <span className="text-stone-400 dark:text-zinc-500 text-xs uppercase tracking-widest">Live</span>
+            <span className="w-1.5 h-1.5 rounded-full anim-blink" style={{ background: '#8ecf5a' }} />
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Live</span>
           </div>
-          <div className="text-stone-400 dark:text-zinc-500 text-xs" style={{ WebkitAppRegion: 'no-drag' }}>
-            {CAT_ICON[sessionData.category]} {sessionData.category}
+          <div className="text-xs" style={{ color: 'var(--text-sub)', WebkitAppRegion: 'no-drag' }}>
+            {sessionData.category}
           </div>
         </div>
 
-        {/* Zone + Score — hero block */}
-        <div className="mb-5 text-center">
-          <div className={`text-xs font-black uppercase tracking-[0.2em] mb-2 ${zone.color}`}>
-            {zone.emoji} {zone.label}
+        {/* Zone + Score hero */}
+        <div className="mb-6 text-center">
+          <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: '0.16em', textTransform: 'uppercase', color: zone.color, marginBottom: 8, transition: 'color 0.6s ease' }}>
+            {zone.label}
           </div>
 
-          <div className="relative inline-block">
-            <div className={`text-[7rem] font-black tabular-nums leading-none ${scoreTextColor(score)}`}>
+          <div style={{ position: 'relative', display: 'inline-block' }}>
+            <div className={zonePop ? 'score-pop' : ''} style={{ fontSize: 108, fontWeight: 900, fontVariantNumeric: 'tabular-nums', lineHeight: 1, letterSpacing: '-4px', color: zone.color, transition: 'color 0.6s ease' }}>
               {score}
             </div>
             {trend !== 0 && (
-              <span className={`absolute top-4 -right-7 text-xl font-black ${trend > 0 ? 'text-lime-400' : 'text-orange-400'}`}>
+              <span style={{ position: 'absolute', top: 16, right: -24, fontSize: 18, fontWeight: 900, color: trend > 0 ? '#8ecf5a' : '#c45050' }}>
                 {trend > 0 ? '↑' : '↓'}
               </span>
             )}
           </div>
 
-          {/* Sparkline */}
           {hist.length > 2 && (
-            <div className="mt-1 mx-auto w-32 h-8">
-              <svg viewBox="0 100 100 100" className="w-full h-full" preserveAspectRatio="none">
-                <path d={sparkPath} fill="none" stroke="currentColor"
-                  className={zone.color} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+            <div style={{ marginTop: 8, marginLeft: 'auto', marginRight: 'auto', width: 128, height: 32 }}>
+              <svg viewBox="0 100 100 100" style={{ width: '100%', height: '100%' }} preserveAspectRatio="none">
+                <path d={sparkPath} fill="none" stroke={zone.color} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" opacity="0.6" />
               </svg>
             </div>
           )}
 
-          {/* Nudge message */}
-          <p className="text-stone-500 dark:text-zinc-400 text-sm mt-2 font-medium">{nudge}</p>
+          <p key={nudge} className="text-sm font-medium mt-2 fadein" style={{ color: 'var(--text-sub)' }}>{nudge}</p>
         </div>
 
-        {/* Score bar (100-level visual) */}
+        {/* Score bar */}
         <div className="mb-5">
-          <div className="h-2 bg-stone-200 dark:bg-zinc-800 rounded-full overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${
-                score >= 70 ? 'bg-lime-400' : score >= 45 ? 'bg-yellow-400' : 'bg-orange-400'
-              }`}
-              style={{ width: `${score}%` }}
-            />
+          <div style={{ height: 3, borderRadius: 999, background: 'var(--track-bg)', overflow: 'hidden' }}>
+            <div style={{ height: '100%', borderRadius: 999, width: `${score}%`, background: zone.color, opacity: 0.65, transition: 'width 0.9s cubic-bezier(0.4,0,0.2,1), background 0.7s ease' }} />
           </div>
-          <div className="flex justify-between text-xs text-stone-300 dark:text-zinc-700 mt-1 px-0.5">
+          <div className="flex justify-between mt-1 px-0.5" style={{ fontSize: 10, color: 'var(--text-muted)' }}>
             <span>Distracted</span>
             <span>Deep Focus</span>
           </div>
         </div>
 
         {/* Timer + progress */}
-        <div className="flex items-center gap-4 mb-5 bg-white/60 dark:bg-zinc-900/60 rounded-3xl px-5 py-4">
-          <div className="text-4xl font-black tabular-nums tracking-tight flex-1">
+        <div className="sz-card flex items-center gap-4 mb-4" style={{ padding: '16px 20px' }}>
+          <div style={{ fontSize: 40, fontWeight: 900, fontVariantNumeric: 'tabular-nums', letterSpacing: '-1px', lineHeight: 1, flex: 1 }}>
             {fmtTimer(update.elapsed)}
           </div>
           <div className="text-right">
-            <div className="text-stone-400 dark:text-zinc-500 text-xs mb-1">{Math.round(progress)}%</div>
-            <div className="w-20 h-1.5 bg-stone-200 dark:bg-zinc-800 rounded-full overflow-hidden">
-              <div className="h-full bg-lime-300/60 rounded-full transition-all" style={{ width: `${progress}%` }} />
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>
+              {Math.round(progress)}%
             </div>
-            <div className="text-stone-300 dark:text-zinc-700 text-xs mt-1">{sessionData.plannedMinutes}m planned</div>
+            <div style={{ width: 72, height: 3, borderRadius: 999, background: 'var(--track-bg)', overflow: 'hidden' }}>
+              <div style={{ height: '100%', borderRadius: 999, width: `${progress}%`, background: '#8ecf5a', opacity: 0.55, transition: 'width 0.5s ease' }} />
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>{sessionData.plannedMinutes}m planned</div>
           </div>
         </div>
 
         {/* Current context */}
         {(update.currentApp || isIdle || aiAnalysis) && (
-          <div className="flex items-center gap-2 mb-4 text-xs text-stone-400 dark:text-zinc-600">
+          <div className="flex items-center gap-2 mb-4 text-xs" style={{ color: 'var(--text-sub)' }}>
             {isIdle
-              ? <span className="text-yellow-400">⏸ Idle {update.idleSecs}s</span>
+              ? <span style={{ color: '#c9a030' }}>Idle {update.idleSecs}s</span>
               : update.currentApp && <span>▶ {aiAnalysis?.topApp || update.currentApp}</span>
             }
             {aiAnalysis && (
-              <span className={`ml-auto font-semibold ${
-                aiAnalysis.isOnTask ? 'text-lime-500' : 'text-orange-400'
-              }`}>
+              <span className="ml-auto font-semibold" style={{ color: aiAnalysis.isOnTask ? '#3fb87a' : '#c97040' }}>
                 {aiAnalysis.isOnTask ? 'on task' : 'off task'}
               </span>
             )}
           </div>
         )}
 
-        {/* Phone */}
+        {/* Phone tracker */}
         {sessionData.trackPhone && (
-          <div className="flex items-center gap-3 mb-5 bg-white/60 dark:bg-zinc-900/60 rounded-3xl px-5 py-4">
-            <div className="flex-1">
-              <div className="text-stone-400 dark:text-zinc-500 text-xs uppercase tracking-widest mb-1">Phone</div>
-              <div className={`text-2xl font-black ${update.phoneCount > 0 ? 'text-orange-400' : 'text-stone-300 dark:text-zinc-700'}`}>
-                {update.phoneCount}× {update.phoneCount === 0 ? '🎯' : '📱'}
+          <div className="sz-card flex items-center gap-4 mb-5" style={{ padding: '16px 20px' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>Phone</div>
+              <div style={{ fontSize: 28, fontWeight: 900, fontVariantNumeric: 'tabular-nums', color: update.phoneCount > 0 ? '#c97040' : 'var(--text-muted)' }}>
+                {update.phoneCount}×
               </div>
             </div>
             <div className="flex flex-col gap-2">
-              <button onClick={checkPhone} disabled={phoneActive}
-                className={`px-4 py-2 rounded-2xl text-xs font-semibold transition-colors ${
-                  phoneActive ? 'bg-stone-100 dark:bg-zinc-800 text-stone-300 dark:text-zinc-700 cursor-not-allowed'
-                              : 'bg-stone-100 dark:bg-zinc-800 hover:bg-orange-50 dark:hover:bg-orange-500/15 text-stone-500 dark:text-zinc-400'
-                }`}>
+              <button
+                onClick={checkPhone}
+                disabled={phoneActive}
+                style={{
+                  padding: '8px 16px', fontSize: 12, fontWeight: 600, borderRadius: 8,
+                  background: 'var(--card-bg)',
+                  color: phoneActive ? 'var(--text-muted)' : 'var(--text-sub)',
+                  border: '1px solid var(--card-border)',
+                  cursor: phoneActive ? 'not-allowed' : 'pointer',
+                  opacity: phoneActive ? 0.5 : 1,
+                }}>
                 Checked phone
               </button>
               {phoneActive && (
-                <button onClick={endPhone}
-                  className="px-4 py-2 rounded-2xl text-xs font-semibold bg-orange-100 dark:bg-orange-500/20 text-orange-600 dark:text-orange-300">
+                <button
+                  onClick={endPhone}
+                  style={{
+                    padding: '8px 16px', fontSize: 12, fontWeight: 600, borderRadius: 8,
+                    background: 'rgba(201,112,64,0.15)', color: '#c97040',
+                    border: '1px solid rgba(201,112,64,0.2)', cursor: 'pointer',
+                  }}>
                   Back to work
                 </button>
               )}
@@ -248,13 +270,21 @@ export default function ActiveSession({ sessionData, onEnd }) {
         )}
 
         {sessionPhoto && (
-          <div className="mb-4 rounded-2xl overflow-hidden" style={{ aspectRatio: '3/4', maxHeight: 200 }}>
-            <img src={sessionPhoto} alt="" className="w-full h-full object-cover" />
+          <div style={{ marginBottom: 16, borderRadius: 12, overflow: 'hidden', aspectRatio: '3/4', maxHeight: 200 }}>
+            <img src={sessionPhoto} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           </div>
         )}
 
-        <button onClick={handleEnd}
-          className="w-full bg-stone-100 hover:bg-stone-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-stone-700 dark:text-white font-bold text-base py-4 rounded-3xl transition-colors">
+        <button
+          onClick={handleEnd}
+          style={{
+            width: '100%', fontWeight: 700, fontSize: 15, padding: '15px 0',
+            background: 'var(--card-bg)',
+            border: '1px solid var(--card-border)',
+            borderTop: '1px solid var(--card-top)',
+            borderRadius: 10, color: 'var(--text)', cursor: 'pointer',
+            transition: 'background 0.15s',
+          }}>
           End Session
         </button>
       </div>

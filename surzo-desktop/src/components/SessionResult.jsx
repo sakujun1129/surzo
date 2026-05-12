@@ -1,8 +1,66 @@
 import { useState, useEffect, useRef } from 'react';
-import { fmtMin, fmtScore, scoreTextColor } from '../utils/format.js';
+import { fmtMin, fmtScore, scoreTextColor, scoreColor } from '../utils/format.js';
 import { CAT_ICON } from '../utils/categories.js';
 import { Card, StatTile, ScoreBar } from './ui.jsx';
 import { saveSession, getSessionPhotos, setCoverPhoto, addSessionPhoto, uploadPhotoFromFile, subscribeSessionPhoto } from '../utils/storage.js';
+import ShareCardModal from './ShareCardModal.jsx';
+
+function ScoreRing({ score, total, title, category, duration, onAddPhoto, uploading }) {
+  const r     = 96;
+  const sw    = 15;
+  const circ  = 2 * Math.PI * r;
+  const filled = Math.min(score / 100, 1) * circ;
+  const color = scoreColor(score);
+  const trackColor = `${color.replace('rgb(', 'rgba(').replace(')', ',0.07)')}`;
+
+  return (
+    <div className="rounded-3xl mb-3 py-7 flex flex-col items-center relative overflow-hidden"
+      style={{ background: trackColor, border: '1px solid rgba(255,255,255,0.04)' }}>
+
+      {/* ring */}
+      <svg width="230" height="230" viewBox="0 0 230 230" style={{ overflow: 'visible' }}>
+        <circle cx="115" cy="115" r={r} fill="none"
+          stroke="currentColor" strokeWidth={sw} strokeOpacity="0.08" className="text-stone-900 dark:text-white" />
+        <circle cx="115" cy="115" r={r} fill="none"
+          stroke={color} strokeWidth={sw}
+          strokeDasharray={`${filled} ${circ}`}
+          strokeLinecap="round"
+          transform="rotate(-90 115 115)"
+          style={{ transition: 'stroke-dasharray 1s cubic-bezier(0.4,0,0.2,1)' }}
+        />
+        {/* pts — hero */}
+        <text x="115" y="107" textAnchor="middle" dominantBaseline="middle"
+          fontSize="52" fontWeight="900" fill={color} fontFamily="inherit" letterSpacing="-2">{total}</text>
+        <text x="115" y="132" textAnchor="middle" fontSize="11" fontWeight="700"
+          fill={color} fillOpacity="0.4" fontFamily="inherit" letterSpacing="2.5">PTS</text>
+        {/* avg — sub */}
+        <text x="115" y="150" textAnchor="middle" fontSize="12" fontWeight="600"
+          fill="currentColor" fillOpacity="0.22" fontFamily="inherit"
+          className="text-stone-900 dark:text-white">avg {score}</text>
+      </svg>
+
+      {/* session meta */}
+      <div className="text-center mt-1 px-6">
+        <div className="font-black text-base leading-tight" style={{ color: 'var(--fg-base)' }}>{title}</div>
+        <div className="text-xs mt-1" style={{ color: 'var(--text-sub)' }}>{category} · {duration}</div>
+      </div>
+
+      {/* add photo */}
+      <button onClick={onAddPhoto} disabled={uploading}
+        className="mt-5 flex items-center gap-2 px-4 py-2 rounded-2xl text-xs font-semibold hover:opacity-70 transition-opacity"
+        style={{ background: 'rgba(255,255,255,0.07)', color: 'var(--text-sub)' }}>
+        {uploading
+          ? <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+          : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
+              <circle cx="12" cy="13" r="4"/>
+            </svg>
+        }
+        写真を追加
+      </button>
+    </div>
+  );
+}
 
 const FOCUS_LABELS    = { 'very-focused': 'Very focused', focused: 'Focused', mixed: 'Mixed', 'not-focused': 'Not focused' };
 const PROGRESS_LABELS = { completed: 'Completed', 'good-progress': 'Good progress', 'some-progress': 'Some progress', 'little-progress': 'Little progress' };
@@ -10,9 +68,7 @@ const PROGRESS_LABELS = { completed: 'Completed', 'good-progress': 'Good progres
 function calcTotal(s) {
   const avg  = Math.round(s.averageWorkScore ?? 0);
   const mins = s.durationMinutes || 1;
-  const raw  = s.totalWorkScore;
-  if (!raw || raw < avg * mins) return Math.round(avg * mins * 60);
-  return raw;
+  return Math.round(avg * mins);
 }
 
 function buildShareText(session) {
@@ -122,21 +178,78 @@ export default function SessionResult({ session, onDone }) {
       : []),
   ];
 
+  const heroColor = scoreColor(session.averageWorkScore);
   return (
-    <div className="h-screen bg-stone-50 dark:bg-zinc-950 text-stone-900 dark:text-white overflow-y-auto pb-8">
-      <div className="max-w-lg mx-auto px-4 pt-10 pb-2 fadein">
+    <div className="h-screen overflow-y-auto pb-8" style={{ background: 'var(--bg-base)', color: 'var(--fg-base)' }}>
+      <div className="max-w-lg mx-auto px-5 pt-10 pb-2 fadein">
         <div className="pt-2 mb-5 window-drag">
-          <h2 className="text-2xl font-black" style={{ WebkitAppRegion: 'no-drag' }}>Session Complete</h2>
+          <h2 className="text-2xl font-black tracking-tight" style={{ WebkitAppRegion: 'no-drag' }}>セッション完了</h2>
         </div>
 
-        {/* Photo section */}
-        <div className="mb-4">
-          {coverUrl && (
-            <div className="rounded-2xl overflow-hidden mb-2" style={{ aspectRatio: '3/4', maxHeight: 280 }}>
+        {/* Hero card — matches Dashboard style: huge total pts + sub stats */}
+        <div className="sz-card mb-3 fadein relative overflow-hidden" style={{ padding: '26px 26px 22px' }}>
+          <div className="absolute inset-x-0 top-0 h-0.5" style={{ background: heroColor }} />
+          <div className="sz-lbl mb-3">RESULT</div>
+          <div className="flex items-baseline gap-2 mb-5">
+            <span className="font-black tabular-nums" style={{
+              fontSize: 96, lineHeight: 0.85, letterSpacing: '-0.05em', color: 'var(--accent)',
+            }}>
+              {fmtScore(calcTotal(session))}
+            </span>
+            <span className="font-bold tracking-widest" style={{ fontSize: 13, color: 'var(--text-muted)' }}>PTS</span>
+          </div>
+          <div className="flex items-center gap-5">
+            <div className="flex-1">
+              <div className="font-black tabular-nums leading-none" style={{ fontSize: 24, color: heroColor }}>
+                {session.averageWorkScore}
+              </div>
+              <div className="sz-lbl mt-1.5">平均</div>
+            </div>
+            <div style={{ width: 1, height: 36, background: 'var(--card-border)' }} />
+            <div className="flex-1">
+              <div className="font-black tabular-nums leading-none" style={{ fontSize: 24 }}>
+                {fmtMin(session.durationMinutes)}
+              </div>
+              <div className="sz-lbl mt-1.5">時間</div>
+            </div>
+            {session.trackPhone && (
+              <>
+                <div style={{ width: 1, height: 36, background: 'var(--card-border)' }} />
+                <div className="flex-1">
+                  <div className="font-black tabular-nums leading-none"
+                    style={{ fontSize: 24, color: session.phoneDistractionCount > 0 ? '#fb923c' : 'var(--text-sub)' }}>
+                    {session.phoneDistractionCount}
+                    <span style={{ fontSize: 13, fontWeight: 600, marginLeft: 2, color: 'var(--text-sub)' }}>回</span>
+                  </div>
+                  <div className="sz-lbl mt-1.5">スマホ</div>
+                </div>
+              </>
+            )}
+          </div>
+          <div className="mt-5 pt-4 border-t" style={{ borderColor: 'var(--card-border)' }}>
+            <div className="font-bold text-sm leading-snug" style={{ color: 'var(--text)' }}>{session.title}</div>
+            <div className="text-xs mt-0.5" style={{ color: 'var(--text-sub)' }}>{session.category}</div>
+          </div>
+        </div>
+
+        {/* Photo / gallery */}
+        <div className="mb-3">
+          {coverUrl ? (
+            <div className="rounded-2xl overflow-hidden mb-2" style={{ aspectRatio: '3/4', maxHeight: 320 }}>
               <img src={coverUrl} alt="" className="w-full h-full object-cover" />
             </div>
+          ) : (
+            <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
+              className="w-full rounded-2xl py-4 font-bold text-sm transition-all flex items-center justify-center gap-2"
+              style={{ background: 'rgba(212,245,122,0.10)', border: '1px solid rgba(212,245,122,0.25)', color: 'var(--accent)' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3.2"/><path d="M8 5l1.5-2h5L16 5"/>
+              </svg>
+              {uploading ? 'アップロード中…' : '写真を追加'}
+            </button>
           )}
-          {photos.length > 0 ? (
+
+          {photos.length > 0 && (
             <>
               <div className="flex gap-2 overflow-x-auto pb-1">
                 {photos.map(p => (
@@ -147,57 +260,30 @@ export default function SessionResult({ session, onDone }) {
                     {p.photo_url === coverUrl && (
                       <div className="absolute inset-0 ring-2 ring-lime-400 rounded-xl" />
                     )}
-                    <div className="absolute top-1 right-1 text-[9px]">
-                      {p.photo_url === coverUrl ? '★' : '☆'}
-                    </div>
                   </button>
                 ))}
                 <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
-                  className="relative flex-shrink-0 rounded-xl flex items-center justify-center bg-stone-100 dark:bg-zinc-800 hover:bg-stone-200 dark:hover:bg-zinc-700 transition-colors"
-                  style={{ width: 72, height: 96 }}>
+                  className="relative flex-shrink-0 rounded-xl flex items-center justify-center transition-colors"
+                  style={{ width: 72, height: 96, background: 'rgba(255,255,255,0.04)', border: '1px dashed var(--card-border)' }}>
                   {uploading
                     ? <div className="w-4 h-4 border-2 border-stone-300 border-t-lime-400 rounded-full animate-spin" />
-                    : <span className="text-2xl text-stone-400 dark:text-zinc-500">+</span>}
+                    : <span style={{ fontSize: 22, color: 'var(--text-muted)' }}>+</span>}
                 </button>
               </div>
-              <p className="text-[10px] text-stone-400 dark:text-zinc-600 mt-1">★ でトップ画面の写真を選択</p>
+              <p className="text-[10px] mt-1.5" style={{ color: 'var(--text-muted)' }}>★ でカバー写真を選択</p>
             </>
-          ) : (
-            <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
-              className="w-full py-6 rounded-2xl border-2 border-dashed border-stone-200 dark:border-zinc-700 text-stone-400 dark:text-zinc-500 text-sm font-semibold hover:border-stone-300 dark:hover:border-zinc-600 transition-colors flex items-center justify-center gap-2 mb-1">
-              {uploading
-                ? <div className="w-4 h-4 border-2 border-stone-300 border-t-lime-400 rounded-full animate-spin" />
-                : '+ 写真を追加'}
-            </button>
           )}
           <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleAddPhoto} />
         </div>
 
-        <Card className="p-6 text-center mb-3 relative overflow-hidden">
-          <div className="absolute inset-x-0 top-0 h-0.5" style={{ backgroundColor: scoreTextColor(session.averageWorkScore) === 'text-lime-400' ? '#d4f57a' : scoreTextColor(session.averageWorkScore) === 'text-yellow-400' ? '#ffd60a' : '#ff453a' }} />
-          <div className="text-stone-400 dark:text-zinc-600 text-[10px] uppercase tracking-widest mb-1">Work Score</div>
-          <div className={`text-[80px] font-black tabular-nums leading-none ${scoreTextColor(session.averageWorkScore)}`}>
-            {fmtScore(calcTotal(session))}
-          </div>
-          <div className="text-stone-400 dark:text-zinc-500 text-sm font-semibold mt-1">avg {session.averageWorkScore}</div>
-          <div className="text-stone-700 dark:text-zinc-200 text-sm mt-3 font-bold leading-snug">{session.title}</div>
-          <div className="text-stone-400 dark:text-zinc-600 text-xs mt-0.5">{session.category} · {fmtMin(session.durationMinutes)}</div>
-        </Card>
-
-        <div className="grid grid-cols-2 gap-3 mb-3">
-          <StatTile label="Total Work"  value={fmtScore(calcTotal(session))} sub="pts" />
-          <StatTile label="Work Time"   value={fmtMin(session.durationMinutes)} />
+        {/* Secondary stats — 2-col compact */}
+        <div className="grid grid-cols-2 gap-2 mb-3">
           <StatTile label="Best Focus"  value={`${session.bestFocusMinutes}m`}   sub="streak" />
           <StatTile label="Deep Work"   value={String(session.deepWorkBlocks)}   sub="blocks ≥10 min" />
-          {session.trackPhone && (
-            <>
-              <StatTile label="Phone Checks" value={String(session.phoneDistractionCount)}
-                color={session.phoneDistractionCount > 0 ? 'text-orange-400' : 'text-lime-500'}
-                sub={session.phoneDistractionCount === 0 ? 'phone-free 🎯' : null} />
-              <StatTile label="Phone Time"
-                value={session.totalPhoneDistractionMinutes > 0 ? fmtMin(session.totalPhoneDistractionMinutes) : '—'}
-                color={session.totalPhoneDistractionMinutes > 0 ? 'text-orange-400' : undefined} />
-            </>
+          {session.trackPhone && session.phoneDistractionCount > 0 && (
+            <StatTile label="Phone Time"
+              value={session.totalPhoneDistractionMinutes > 0 ? fmtMin(session.totalPhoneDistractionMinutes) : '—'}
+              color={session.totalPhoneDistractionMinutes > 0 ? 'text-orange-400' : undefined} />
           )}
         </div>
 
@@ -259,27 +345,51 @@ export default function SessionResult({ session, onDone }) {
           </div>
         </Card>
 
-        <Card className="p-4 mb-3">
-          <div className="text-stone-400 dark:text-zinc-500 text-xs uppercase tracking-widest mb-3">Session Notes</div>
-          <div className="space-y-2.5">
-            {session.positiveReasons.map((r, i) => (
-              <div key={i} className="flex gap-2.5 text-sm">
-                <span className="text-lime-500 font-black mt-px flex-shrink-0">+</span>
-                <span className="text-stone-700 dark:text-zinc-300 leading-snug">{r}</span>
+        {/* Good points */}
+        {session.positiveReasons?.length > 0 && (
+          <Card className="p-4 mb-3">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-5 h-5 rounded-md flex items-center justify-center"
+                style={{ background: 'rgba(212,245,122,0.15)', color: '#86b03d' }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
               </div>
-            ))}
-          </div>
-          {session.negativeReasons.length > 0 && (
-            <div className="space-y-2.5 mt-3 pt-3 border-t border-stone-100 dark:border-zinc-800">
-              {session.negativeReasons.map((r, i) => (
+              <div className="text-xs uppercase tracking-widest font-bold" style={{ color: '#86b03d' }}>良かった点</div>
+            </div>
+            <div className="space-y-3">
+              {session.positiveReasons.map((r, i) => (
                 <div key={i} className="flex gap-2.5 text-sm">
-                  <span className="text-stone-300 dark:text-zinc-600 mt-px flex-shrink-0">→</span>
-                  <span className="text-stone-400 dark:text-zinc-500 leading-snug">{r}</span>
+                  <span className="font-black mt-px flex-shrink-0" style={{ color: '#86b03d' }}>+</span>
+                  <span className="leading-relaxed" style={{ color: 'var(--text)' }}>{r}</span>
                 </div>
               ))}
             </div>
-          )}
-        </Card>
+          </Card>
+        )}
+
+        {/* Improvement points */}
+        {session.negativeReasons?.length > 0 && (
+          <Card className="p-4 mb-3">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-5 h-5 rounded-md flex items-center justify-center"
+                style={{ background: 'rgba(251,146,60,0.18)', color: '#fb923c' }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+                </svg>
+              </div>
+              <div className="text-xs uppercase tracking-widest font-bold" style={{ color: '#fb923c' }}>改善点</div>
+            </div>
+            <div className="space-y-3">
+              {session.negativeReasons.map((r, i) => (
+                <div key={i} className="flex gap-2.5 text-sm">
+                  <span className="font-black mt-px flex-shrink-0" style={{ color: '#fb923c' }}>→</span>
+                  <span className="leading-relaxed" style={{ color: 'var(--text-sub)' }}>{r}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
 
         <Card className="p-4 mb-3">
           <button onClick={() => setShowSelfCheck(v => !v)}
@@ -344,42 +454,19 @@ export default function SessionResult({ session, onDone }) {
             className="flex-1 bg-stone-100 hover:bg-stone-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-stone-700 dark:text-white font-bold text-base py-4 rounded-3xl transition-colors">
             Back to Dashboard
           </button>
-          <div className="relative">
-            <button onClick={() => setShowShare(v => !v)}
-              className="h-full bg-stone-100 hover:bg-stone-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-stone-700 dark:text-zinc-200 font-bold px-5 rounded-3xl transition-colors flex items-center gap-2">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>
-              </svg>
-              共有
-            </button>
-            {showShare && (
-              <div className="absolute bottom-full right-0 mb-2 bg-white dark:bg-zinc-900 border border-stone-200 dark:border-zinc-800 rounded-3xl p-2 shadow-2xl w-52 z-50">
-                <button onClick={() => { handleShareCopy(); setShowShare(false); }}
-                  className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-stone-100 dark:hover:bg-zinc-800 text-sm font-semibold text-stone-700 dark:text-zinc-200 transition-colors">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-                  </svg>
-                  {copied ? '✓ コピー完了' : 'テキストをコピー'}
-                </button>
-                <button onClick={() => { window.electronAPI?.openExternal(`https://twitter.com/intent/tweet?text=${encodeURIComponent(buildShareText(session))}`); setShowShare(false); }}
-                  className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-stone-100 dark:hover:bg-zinc-800 text-sm font-semibold text-stone-700 dark:text-zinc-200 transition-colors">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.713 5.923zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
-                  </svg>
-                  X でシェア
-                </button>
-                <button onClick={() => { window.electronAPI?.openExternal(`https://www.threads.net/intent/post?text=${encodeURIComponent(buildShareText(session))}`); setShowShare(false); }}
-                  className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl hover:bg-stone-100 dark:hover:bg-zinc-800 text-sm font-semibold text-stone-700 dark:text-zinc-200 transition-colors">
-                  <svg width="14" height="14" viewBox="0 0 192 192" fill="currentColor">
-                    <path d="M141.537 88.988a66.667 66.667 0 00-2.518-1.143c-1.482-27.307-16.403-42.94-41.457-43.1h-.34c-14.986 0-27.449 6.396-35.12 18.036l13.779 9.452c5.73-8.695 14.724-10.548 21.348-10.548h.23c8.249.054 14.474 2.452 18.503 7.129 2.932 3.405 4.893 8.111 5.864 14.05-7.314-1.243-15.224-1.626-23.68-1.14-23.82 1.372-39.134 15.265-38.105 34.569.522 9.792 5.4 18.216 13.735 23.719 7.047 4.652 16.124 6.927 25.557 6.412 12.458-.683 22.231-5.436 29.049-14.127 5.178-6.6 8.453-15.153 9.899-25.93 5.937 3.583 10.337 8.298 12.767 13.966 4.132 9.635 4.373 25.468-8.546 38.318-11.319 11.24-24.955 16.109-45.488 16.256-22.788-.169-40.041-7.478-51.285-21.75C35.238 139.939 29.92 120.007 29.712 96c.208-24.007 5.526-43.939 15.791-59.249 11.244-14.271 28.497-21.58 51.285-21.75 22.748.17 40.56 7.514 53.04 21.836 6.253 7.001 10.609 15.93 13.203 26.498l16.168-4.312C176.65 48.25 171.04 37.04 163.07 28.018 148.002 11.274 126.31 2.15 96.1 2 65.96 2.15 44.002 11.299 28.74 28.086 15.266 43.054 8.344 63.966 8.1 96v.12c.244 32.034 7.166 52.946 20.64 67.914C44.002 180.821 65.96 190 96.1 190c27.736-.18 47.451-7.568 63.182-23.85 21.286-21.82 20.681-49.357 13.617-66.186-5.011-11.682-14.714-21.326-31.362-10.976z"/>
-                  </svg>
-                  Threads でシェア
-                </button>
-              </div>
-            )}
-          </div>
+          <button onClick={() => setShowShare(true)}
+            className="bg-stone-100 hover:bg-stone-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-stone-700 dark:text-zinc-200 font-bold px-5 rounded-3xl transition-colors flex items-center gap-2">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>
+            </svg>
+            共有
+          </button>
         </div>
       </div>
+
+      {showShare && (
+        <ShareCardModal session={session} photoUrl={coverUrl} onClose={() => setShowShare(false)} />
+      )}
     </div>
   );
 }

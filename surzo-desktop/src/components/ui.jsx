@@ -1,8 +1,6 @@
-import { scoreTextColor, scoreBgColor } from '../utils/format.js';
-
-export function Card({ children, className = '' }) {
+export function Card({ children, className = '', style = {} }) {
   return (
-    <div className={`bg-white dark:bg-zinc-900/80 border border-stone-200 dark:border-white/[0.06] rounded-3xl ${className}`}>
+    <div className={`sz-card ${className}`} style={style}>
       {children}
     </div>
   );
@@ -11,36 +9,38 @@ export function Card({ children, className = '' }) {
 export function StatTile({ label, value, sub, color }) {
   return (
     <Card className="p-4">
-      <div className="text-stone-400 dark:text-zinc-500 text-xs uppercase tracking-widest mb-1">{label}</div>
-      <div className={`text-2xl font-black tabular-nums ${color || 'text-stone-900 dark:text-white'}`}>{value}</div>
-      {sub && <div className="text-stone-400 dark:text-zinc-600 text-xs mt-0.5">{sub}</div>}
+      <div className="sz-lbl mb-1.5">{label}</div>
+      <div className="text-2xl font-black tabular-nums" style={{ color: color || 'var(--fg-base)' }}>{value}</div>
+      {sub && <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{sub}</div>}
     </Card>
   );
 }
 
-export function ScoreBar({ value, max = 100, negative = false }) {
+export function ScoreBar({ value, max = 100 }) {
   const pct = Math.min(100, (value / max) * 100);
+  const color = value >= 70 ? 'var(--score-a)' : value >= 55 ? 'var(--score-b)' : value >= 38 ? 'var(--score-d)' : 'var(--score-f)';
   return (
-    <div className="h-1 bg-stone-200 dark:bg-zinc-800 rounded-full overflow-hidden">
-      <div
-        className={`h-full rounded-full ${negative ? 'bg-orange-500/70' : scoreBgColor(value)}`}
-        style={{ width: `${pct}%` }}
-      />
+    <div className="h-0.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.07)' }}>
+      <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: color }} />
     </div>
   );
 }
 
 export function PermissionBanner({ onCheck }) {
   return (
-    <div className="bg-yellow-50 dark:bg-yellow-500/10 border border-yellow-200 dark:border-yellow-500/30 rounded-2xl px-4 py-3 mb-4 flex items-start gap-3">
-      <span className="text-yellow-500 dark:text-yellow-400 text-lg mt-0.5">⚠️</span>
+    <div className="sz-card px-4 py-3 mb-4 flex items-start gap-3" style={{ borderColor: 'rgba(201,160,48,0.25)', borderTopColor: 'rgba(201,160,48,0.35)' }}>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style={{ color: 'var(--score-d)', marginTop: 1, flexShrink: 0 }}>
+        <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        <line x1="12" y1="9" x2="12" y2="13" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+        <line x1="12" y1="17" x2="12.01" y2="17" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+      </svg>
       <div className="flex-1">
-        <div className="text-yellow-700 dark:text-yellow-300 text-sm font-semibold">Accessibility Permission Required</div>
-        <div className="text-yellow-600/80 dark:text-yellow-500/80 text-xs mt-0.5">
+        <div className="text-sm font-semibold" style={{ color: 'var(--score-d)' }}>Accessibility Permission Required</div>
+        <div className="text-xs mt-0.5" style={{ color: 'var(--text-sub)' }}>
           System Settings → Privacy &amp; Security → Accessibility → Enable Surzo
         </div>
       </div>
-      <button onClick={onCheck} className="text-yellow-600 dark:text-yellow-400 text-xs underline flex-shrink-0 mt-0.5">
+      <button onClick={onCheck} className="text-xs underline flex-shrink-0 mt-0.5" style={{ color: 'var(--text-sub)' }}>
         Check again
       </button>
     </div>

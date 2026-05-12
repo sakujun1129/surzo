@@ -39,6 +39,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkScreen:      ()     => ipcRenderer.invoke('permissions:screen'),
   writeToClipboard: (text) => ipcRenderer.invoke('clipboard:write', text),
   openExternal:     (url)  => ipcRenderer.invoke('shell:open', url),
+  generateQR:       (url)  => ipcRenderer.invoke('qr:generate', url),
+  detectContext:    ()     => ipcRenderer.invoke('context:detect'),
+  setWidgetMouse:   (ignore) => ipcRenderer.send('widget:mouse', ignore),
+  widgetTap:        () => ipcRenderer.send('widget:tap'),
+  widgetDragStart:  () => ipcRenderer.send('widget:drag-start'),
+  widgetDragEnd:    () => ipcRenderer.send('widget:drag-end'),
 
   // Alert (widget-integrated)
   onAlertMobile: (cb) => {
@@ -56,4 +62,31 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('alert:clear', l);
     return () => ipcRenderer.removeListener('alert:clear', l);
   },
+
+  // Theme sync (main window → widget)
+  setTheme: (theme) => ipcRenderer.send('theme:set', theme),
+  onThemeChange: (cb) => {
+    const l = (_, t) => cb(t);
+    ipcRenderer.on('theme:change', l);
+    return () => ipcRenderer.removeListener('theme:change', l);
+  },
+
+  // Auto-update
+  onUpdateAvailable: (cb) => {
+    const l = (_, info) => cb(info);
+    ipcRenderer.on('update:available', l);
+    return () => ipcRenderer.removeListener('update:available', l);
+  },
+  onUpdateProgress: (cb) => {
+    const l = (_, info) => cb(info);
+    ipcRenderer.on('update:progress', l);
+    return () => ipcRenderer.removeListener('update:progress', l);
+  },
+  onUpdateDownloaded: (cb) => {
+    const l = (_, info) => cb(info);
+    ipcRenderer.on('update:downloaded', l);
+    return () => ipcRenderer.removeListener('update:downloaded', l);
+  },
+  applyUpdate:   () => ipcRenderer.invoke('update:apply'),
+  checkForUpdate: () => ipcRenderer.invoke('update:check'),
 });

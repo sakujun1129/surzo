@@ -1,6 +1,6 @@
 {
   "name": "surzo-desktop",
-  "version": "0.1.0",
+  "version": "0.2.3",
   "description": "Surzo – PC work tracker",
   "type": "module",
   "main": "electron/main.cjs",
@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.4",
+    "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
@@ -31,11 +32,13 @@
     "productName": "Surzo",
     "mac": {
       "category": "public.app-category.productivity",
-      "target": "dmg"
+      "target": "dmg",
+      "icon": "build/icon.icns"
     },
     "files": [
       "dist/**/*",
-      "electron/**/*"
+      "electron/**/*",
+      "build/icon.png"
     ]
   }
 }

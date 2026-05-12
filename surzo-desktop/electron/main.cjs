@@ -3,9 +3,11 @@
 const { app, BrowserWindow, ipcMain, powerMonitor, systemPreferences, screen, clipboard, shell } = require('electron');
 const path  = require('path');
 const fs    = require('fs');
-const { execFile } = require('child_process');
+const https = require('https');
+const { execFile, spawn } = require('child_process');
 const { loadConfig, saveConfig } = require('./config.cjs');
 const { captureScreen, analyzeScreen } = require('./ai-analyzer.cjs');
+const QRCode = require('qrcode');
 
 const isDev     = process.env.NODE_ENV === 'development';
 const DATA_FILE = path.join(app.getPath('userData'), 'surzo_sessions.json');
@@ -151,10 +153,15 @@ const NATIVE_APP_SCORES = {
   excel: 75, numbers: 75, keynote: 75, powerpoint: 75,
   // AI tools (treated as work tools)
   chatgpt: 70,
-  // Communication (moderate)
+  // Communication (moderate — work context)
   slack: 55, teams: 55, zoom: 60,
+  // Messaging apps — personal, off-task
+  line: 18, 'line app': 18, whatsapp: 18, telegram: 20, signal: 20,
+  messages: 22, imessage: 22, discord: 30,
   // Clearly not work
   spotify: 30, 'apple music': 30, vlc: 20, quicktime: 20,
+  // Games
+  steam: 10, 'game center': 10,
 };
 
 function scoreNativeApp(appName, category) {
@@ -195,7 +202,7 @@ const CATEGORY_APPS = {
   'Free Work':    [],
 };
 
-const DISTRACTION_KEYWORDS = ['youtube', 'netflix', 'twitter', 'instagram', 'tiktok', 'facebook', 'reddit', 'twitch'];
+const DISTRACTION_KEYWORDS = ['youtube', 'netflix', 'twitter', 'instagram', 'tiktok', 'facebook', 'reddit', 'twitch', 'line', 'whatsapp', 'telegram', 'messages'];
 
 function appMatchesCategory(appName, category) {
   if (category === 'Free Work') return true;
@@ -290,22 +297,29 @@ function computeScoreFromEvents(state) {
     : 0;
 
   const base =
-    0.22 * focusConsistency +
-    0.18 * taskAlignment +
-    0.15 * deepWorkRatio +
-    0.10 * recoveryReturn +
-    0.20 * activitySignal -
-    0.15 * distractionPenalty;
+    0.26 * focusConsistency +
+    0.22 * taskAlignment +
+    0.18 * deepWorkRatio +
+    0.12 * recoveryReturn +
+    0.22 * activitySignal -
+    0.18 * distractionPenalty;
 
-  // Small bonuses for exceptional performance
+  // Bonuses for exceptional performance
   let bonus = 0;
-  if (focusConsistency >= 90 && taskAlignment >= 90) bonus += 5;
-  if (activitySignal >= 85)                          bonus += 4;
-  if (deepWorkRatio >= 50)                           bonus += 4;
-  if (distractionPenalty === 0)                      bonus += 2;
+  if (focusConsistency >= 90 && taskAlignment >= 90) bonus += 8;
+  if (activitySignal >= 85)                          bonus += 5;
+  if (deepWorkRatio >= 50)                           bonus += 6;
+  if (distractionPenalty === 0)                      bonus += 4;
 
-  const avg = Math.round(Math.max(0, base + bonus + sustainBonus - inactivePenalty - phonePenalty));
-  const total = Math.round(totalSecs * avg);
+  const raw = Math.max(0, Math.min(100, base + bonus + sustainBonus - inactivePenalty - phonePenalty));
+
+  // Stretch distribution: compress toward center, require sustained effort for high scores
+  const stretched = raw <= 55
+    ? raw * 0.78
+    : 55 + (raw - 55) * 1.25;
+  const avg = Math.round(Math.max(0, Math.min(100, stretched)));
+  // pts = avg × minutes (not inflated by 60×)
+  const total = Math.round((totalSecs / 60) * avg);
 
   return {
     scoreBreakdown: {
@@ -356,55 +370,55 @@ function computeLiveWindowScore(activityLog, windowEvents, sessionData, currentI
 
   if (isDist && typingRatio > 0.4) {
     // P01 Distraction site but actively typing (comments, DMs)
-    score = 22;
+    score = 18;
   } else if (isDist) {
     // P02 Distraction site, passive watching/scrolling
-    score = 8;
+    score = 6;
   } else if (currentIdleSecs >= 25) {
     // P03 Medium idle — taking a break (after distraction check)
-    score = 22;
+    score = 18;
   } else if (typingRatio > 0.55 && isInTask) {
-    // P04 Deep focus — sustained typing in correct app
-    score = Math.round(82 + typingRatio * 18);
+    // P04 Deep focus — sustained typing in correct app (base ~70, time bonus needed to reach 90)
+    score = Math.round(64 + typingRatio * 10);
   } else if (typingRatio > 0.25 && isInTask) {
     // P05 Focused work — moderate typing in correct app
-    score = Math.round(62 + typingRatio * 35 + mouseRatio * 8);
+    score = Math.round(50 + typingRatio * 20 + mouseRatio * 5);
   } else if (mouseRatio > 0.5 && isInTask && typingRatio < 0.1) {
     // P06 Design / reading — heavy mouse, no typing, correct app
-    score = Math.round(55 + mouseRatio * 18);
+    score = Math.round(42 + mouseRatio * 12);
   } else if (mouseRatio > 0.3 && isInTask && typingRatio < 0.1) {
     // P07 Browsing research in correct category
-    score = Math.round(45 + mouseRatio * 20);
+    score = Math.round(33 + mouseRatio * 14);
   } else if (typingRatio > 0.45 && !isInTask) {
     // P08 Typing in wrong app (side notes, unrelated work)
-    score = Math.round(42 + typingRatio * 18);
+    score = Math.round(32 + typingRatio * 11);
   } else if (activeRatio > 0.5 && isInTask) {
     // P09 Active but unclear input, correct app
-    score = Math.round(50 + activeRatio * 18);
+    score = Math.round(40 + activeRatio * 13);
   } else if (typingRatio > 0.15 && isInTask) {
     // P10 Light typing in correct app
-    score = Math.round(48 + typingRatio * 25);
+    score = Math.round(37 + typingRatio * 18);
   } else if (mouseRatio > 0.3 && !isInTask) {
     // P11 Mouse activity in wrong app
-    score = Math.round(32 + mouseRatio * 12);
+    score = Math.round(22 + mouseRatio * 10);
   } else if (currentIdleSecs >= 15) {
     // P12 Pause 15-25s — thinking or reading
-    score = 28;
+    score = 22;
   } else if (currentIdleSecs >= 10) {
     // P13 Pause 10-15s — short stop
-    score = 33;
+    score = 27;
   } else if (currentIdleSecs >= 5) {
     // P14 Micro-pause 5-10s — brief hands-off
-    score = 40;
+    score = 32;
   } else if (currentIdleSecs >= 2) {
     // P15 Tiny pause 2-5s — momentary rest
-    score = 46;
+    score = 38;
   } else if (activeRatio > 0.3 && !isInTask) {
     // P16 Some activity but wrong app
-    score = Math.round(35 + activeRatio * 12);
+    score = Math.round(25 + activeRatio * 10);
   } else {
     // P17 Minimal activity — present but not doing much
-    score = Math.round(30 + activeRatio * 18 + (isInTask ? 10 : 0));
+    score = Math.round(20 + activeRatio * 12 + (isInTask ? 8 : 0));
   }
 
   // AI sets the range; activity-based pattern score provides variation within that range
@@ -457,38 +471,161 @@ function computeActivitySignal(log) {
   return Math.round(Math.max(0, Math.min(110, raw)));
 }
 
+async function generateAINote(sessionData, score, apiKey) {
+  if (!apiKey) return null;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 60,
+        messages: [{
+          role: 'user',
+          content: `集中セッションのデータ:
+タスク="${sessionData.title}", カテゴリ=${sessionData.category}, 時間=${score.durationMinutes}分, スコア=${score.averageWorkScore}/100, 深い集中ブロック=${score.deepWorkBlocks}回, スマホチェック=${score.phoneDistractionCount}回, 集中の一貫性=${score.scoreBreakdown.focusConsistency}/100。
+
+このユーザーへの具体的で個別最適化されたコーチングコメントを1文で日本語で書いてください。
+- スコアが低ければ辛口で（甘やかさない）
+- スコアが高ければ簡潔に讃える
+- 20文字〜45文字
+- 「素晴らしい」「お疲れ様」のような定型句は禁止
+- データの具体的な数字を引いて指摘する
+- 行動につながる助言にする`,
+        }],
+      }),
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const text = data.content?.[0]?.text?.trim().replace(/^["']|["']$/g, '');
+    return text && text.length > 12 && text.length < 140 ? text : null;
+  } catch { return null; }
+}
+
 function generateReasons(score, category, windowEvents, phoneCount) {
+  const avg  = score.averageWorkScore;
+  const mins = score.durationMinutes || 1;
+  const fc   = score.scoreBreakdown.focusConsistency;
+  const ta   = score.scoreBreakdown.taskAlignment;
+  const dw   = score.scoreBreakdown.deepWorkRatio;
+  const dp   = score.scoreBreakdown.distractionPenalty;
+  const phoneMins = score.totalPhoneDistractionMinutes || 0;
+  const phoneRatio = mins > 0 ? phoneMins / mins : 0;
+  const deepBlocks = score.deepWorkBlocks || 0;
+  const bestFocus = score.bestFocusMinutes || 0;
+  const hour = new Date().getHours();
+  const isMorning = hour >= 5 && hour < 11;
+  const isAfternoon = hour >= 12 && hour < 17;
+  const isEvening = hour >= 17 && hour < 22;
+  const isLate = hour >= 22 || hour < 5;
+  const rnd = (arr) => arr[Math.floor(Math.random() * arr.length)];
   const pos = [];
   const neg = [];
 
-  if (score.averageWorkScore >= 80)      pos.push("Your focus was exceptionally strong this session.");
-  else if (score.averageWorkScore >= 70) pos.push("You maintained solid momentum throughout.");
-  else                                   pos.push("You showed up and put in the work — that always counts.");
+  // ── POSITIVES (data-driven, specific) ──────────────────────────────────────
 
-  if (score.scoreBreakdown.focusConsistency >= 75)
-    pos.push(`You stayed within ${category} apps for most of the session.`);
-  else if (score.scoreBreakdown.taskAlignment >= 80)
-    pos.push("Your active work time was high — minimal idle drift.");
+  // P1: about the score with specific stretch reference
+  if (avg >= 85) {
+    pos.push(rnd([
+      `平均スコア${avg}は上位5%レベル。${mins}分の中で${bestFocus}分の最長連続集中を出した。`,
+      `スコア${avg}でフィニッシュ。${category}に意識が向き続けていた証拠。`,
+      `${mins}分でavg${avg}は文句なし。同じ条件をテンプレ化して再現を狙おう。`,
+    ]));
+  } else if (avg >= 70) {
+    pos.push(rnd([
+      `安定したavg${avg}。前半・後半で大崩れせずに走り切れた。`,
+      `${mins}分中、最長連続集中${bestFocus}分。良いリズムが出ていた。`,
+      `スコア${avg}は実用レベル。明日もこの土台があれば充分積み上がる。`,
+    ]));
+  } else if (avg >= 55) {
+    pos.push(rnd([
+      `avg${avg}で着地。${bestFocus}分の最長集中は悪くない。ここを伸ばすのが次の課題。`,
+      `${mins}分続けたこと自体に価値あり。スコアは伸びしろ。`,
+    ]));
+  } else if (avg >= 40) {
+    pos.push(rnd([
+      `${mins}分の作業を完走した。スコア${avg}は環境のノイズが大きかった可能性。`,
+      `avg${avg}でも記録した意味はある。原因の特定が次のステップ。`,
+    ]));
+  } else {
+    pos.push(rnd([
+      `スコア${avg}でも記録できたこと自体が次への材料。`,
+      `データを残したことが今日の収穫。明日の比較対象になる。`,
+    ]));
+  }
 
-  if (phoneCount === 0)      pos.push("You stayed completely phone-free. That's rare and valuable.");
-  else if (phoneCount <= 2)  pos.push("You returned to work after each phone check — good recovery.");
-  else                       pos.push("Noticing your phone habits is the first step to changing them.");
+  // P2: deep work / focus consistency (specific number)
+  if (deepBlocks >= 3) {
+    pos.push(`深い集中ブロック${deepBlocks}回。これは10分以上の連続集中で、最も価値が高い時間帯。`);
+  } else if (deepBlocks >= 1) {
+    pos.push(`深い集中ブロック${deepBlocks}回 (10分以上連続)。次は${deepBlocks + 1}回を目標にしてみよう。`);
+  } else if (bestFocus >= 15 && fc >= 70) {
+    pos.push(`${bestFocus}分の連続集中を達成。あと数分粘ればdeep workブロックの認定圏内。`);
+  }
 
-  if (score.scoreBreakdown.deepWorkRatio >= 40)
-    pos.push("You hit deep focus blocks — the most valuable kind of work.");
+  // P3: task alignment / phone (specific)
+  if (fc >= 80) {
+    pos.push(`${category}のアプリ内で時間の${fc}%を過ごした。軸ブレが少ない高品質な時間。`);
+  }
+  if (phoneCount === 0 && mins >= 20) {
+    pos.push(`${mins}分間スマホ触らずに完走。これが標準になればスコアは自然と上がる。`);
+  } else if (phoneCount === 1) {
+    pos.push(`スマホは${phoneCount}回だけ。すぐ戻った復元力は評価できる。`);
+  }
 
-  if (score.scoreBreakdown.focusConsistency < 55)
-    neg.push(`You spent significant time outside ${category} apps. Try to stay in your chosen category.`);
-  if (score.scoreBreakdown.distractionPenalty > 15)
-    neg.push("Frequent app switching may have fragmented your focus. Try longer stretches in one app.");
-  if (phoneCount >= 3)
-    neg.push("Phone interruptions may have reduced your focus rhythm. Next time, try a 15-minute phone-free block.");
-  if (score.scoreBreakdown.taskAlignment < 65)
-    neg.push("You had notable idle time. Shorter, more intense sessions might work better.");
+  // Morning bonus
+  if (isMorning && avg >= 70) {
+    pos.push("朝イチでこのスコア。1日の波を作る上で理想的な滑り出し。");
+  }
+
+  // ── NEGATIVES (specific data + concrete action) ───────────────────────────
+
+  // Phone-related (priority 1 if dominant)
+  if (phoneCount >= 5) {
+    neg.push(`スマホ${phoneCount}回・合計${Math.round(phoneMins)}分。次回はスマホを別の部屋／引き出しに物理的に隔離してみよう。机に置いてあるだけで集中力は20%落ちる研究データもある。`);
+  } else if (phoneCount >= 3) {
+    neg.push(`スマホ${phoneCount}回 (約${Math.round(phoneMins)}分)。次回は25分のphone-freeブロックを1本作ることから始めよう。`);
+  } else if (phoneRatio > 0.15) {
+    neg.push(`セッション時間の${Math.round(phoneRatio * 100)}%をスマホに使った。1回あたり${Math.round(phoneMins / Math.max(phoneCount, 1))}分の中断は、戻ってきても集中の立ち上げに3-5分かかる。`);
+  }
+
+  // Duration too short
+  if (mins < 15) {
+    neg.push(`${mins}分のセッションは深い集中が立ち上がる前。脳の集中モードに入るには10-15分かかるので、最低でも25分は粘りたい。`);
+  } else if (mins >= 15 && mins < 25 && deepBlocks === 0) {
+    neg.push(`${mins}分で深いブロックなし。あと10分粘れば1ブロック達成できた可能性が高い。次は最低25分。`);
+  }
+
+  // Task alignment too low
+  if (fc < 50 && phoneCount < 3) {
+    neg.push(`${category}以外のアプリで${100 - fc}%の時間を過ごしている。開始前に関係ないアプリ・タブを物理的に閉じ、Cmd+TabもCmd+~も使わない縛りを試そう。`);
+  } else if (fc < 70 && phoneCount < 3) {
+    neg.push(`${category}周辺の集中率が${fc}%。SlackやSafariなど別カテゴリのアプリを1つでも閉じれば、次回は${Math.min(95, fc + 15)}%まで上がる見込み。`);
+  }
+
+  // Activity / distraction switching
+  if (dp > 25 && mins >= 15) {
+    neg.push(`アプリ切替コストが大きい。20分間は1つのアプリだけ開いて、それ以外を意識的に閉じる「シングルアプリチャレンジ」を試そう。`);
+  } else if (ta < 55 && mins >= 20) {
+    neg.push(`アイドル時間が${100 - ta}%。手が止まる時間が長い。25分タイマーを引いて「次の20分でこれを終わらせる」という具体的なマイクロゴールを置こう。`);
+  }
+
+  // Time of day
+  if (isLate && avg < 60) {
+    neg.push("22時以降のセッションは平均スコアが下がりがち。同じ作業を翌朝6-10時に動かすと、データ的にはスコアが10-20上がる人が多い。試してみる価値あり。");
+  }
 
   return {
-    positiveReasons: pos.slice(0, 3),
-    negativeReasons: neg.slice(0, 2),
+    positiveReasons: pos.slice(0, 3).filter(Boolean),
+    negativeReasons: neg.slice(0, 2).filter(Boolean),
   };
 }
 
@@ -511,6 +648,7 @@ let mainWindow          = null;
 let widgetWindow        = null;
 let alertCooldownUntil  = 0;
 let prevLiveZone        = null;
+let targetScore         = null;
 let postAlertSlowUntil  = 0;   // timestamp: enforce slow rise after alert/idle-return
 let wasIdle             = false;
 let permissionOk    = false;
@@ -528,13 +666,70 @@ const ALERT_MESSAGES = [
 
 // ─── Floating Widget Window ───────────────────────────────────────────────────
 
+function isPositionOnScreen(pos) {
+  if (!pos || typeof pos.x !== 'number' || typeof pos.y !== 'number') return false;
+  return screen.getAllDisplays().some(d => {
+    const b = d.bounds;
+    return pos.x >= b.x - 60 && pos.x < b.x + b.width - 40 &&
+           pos.y >= b.y - 20 && pos.y < b.y + b.height - 30;
+  });
+}
+
 function repositionWidget() {
   if (!widgetWindow) return;
+  const saved = loadConfig().widgetPos;
+  if (saved && isPositionOnScreen(saved)) {
+    widgetWindow.setPosition(Math.round(saved.x), Math.round(saved.y));
+    return;
+  }
   const { workArea } = screen.getPrimaryDisplay();
   widgetWindow.setPosition(
     Math.floor((workArea.width - 220) / 2),
-    workArea.y + workArea.height - 130 - 10  // 10px gap above Dock; 130 = widget height
+    workArea.y + workArea.height - 44
   );
+}
+
+// ─── Widget tap / long-press-drag ─────────────────────────────────────────────
+
+let widgetIsDragging   = false;
+let widgetDragInterval = null;
+
+function startWidgetDrag() {
+  if (!widgetWindow || widgetIsDragging) return;
+  const startCur = screen.getCursorScreenPoint();
+  const [wx, wy] = widgetWindow.getPosition();
+  widgetIsDragging = true;
+  widgetWindow.setIgnoreMouseEvents(false, { forward: true });
+  if (widgetDragInterval) clearInterval(widgetDragInterval);
+  widgetDragInterval = setInterval(() => {
+    if (!widgetWindow) return;
+    const cur = screen.getCursorScreenPoint();
+    widgetWindow.setPosition(
+      Math.round(wx + (cur.x - startCur.x)),
+      Math.round(wy + (cur.y - startCur.y))
+    );
+  }, 16);
+}
+
+function endWidgetDrag() {
+  if (widgetDragInterval) { clearInterval(widgetDragInterval); widgetDragInterval = null; }
+  if (!widgetIsDragging) return;
+  widgetIsDragging = false;
+  if (widgetWindow) {
+    const [wx, wy] = widgetWindow.getPosition();
+    saveConfig({ widgetPos: { x: wx, y: wy } });
+  }
+}
+
+function focusMainWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    if (app.dock?.show) app.dock.show();
+  } else {
+    createWindow();
+  }
 }
 
 function createWidget() {
@@ -550,6 +745,7 @@ function createWidget() {
     resizable: false,
     movable: true,
     hasShadow: false,
+    focusable: false,  // prevents widget from stealing focus from other apps
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -559,6 +755,7 @@ function createWidget() {
 
   widgetWindow.setAlwaysOnTop(true, 'screen-saver');
   widgetWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  widgetWindow.setIgnoreMouseEvents(true, { forward: true }); // transparent area click-through
   repositionWidget();
 
   // Reposition when Dock shows/hides or display changes
@@ -647,8 +844,10 @@ function startTracking() {
   if (trackingTimer) return;
   createWidget();
   startAiAnalysis();
+  let tickCount = 0;
   trackingTimer = setInterval(async () => {
     if (!sessionState || !mainWindow) return;
+    tickCount++;
 
     const idleSecs  = powerMonitor.getSystemIdleTime();
     const now       = Date.now();
@@ -685,9 +884,7 @@ function startTracking() {
     lastCursorPos = cursorPos;
     if (win?.app) lastAppName = win.app;
 
-    // Compute live score and send to renderer
-    const scoreData = computeScoreFromEvents(sessionState);
-    const elapsed   = Math.floor((now - sessionState.sessionData.startedAt) / 1000);
+    const elapsed    = Math.floor((now - sessionState.sessionData.startedAt) / 1000);
     const currentApp = sessionState.windowEvents[sessionState.windowEvents.length - 1];
 
     const _dbgWin = sessionState.windowEvents[sessionState.windowEvents.length - 1];
@@ -696,30 +893,48 @@ function startTracking() {
     // Track idle transitions to enforce slow recovery after returning
     const nowIsIdle = idleSecs >= 30;
     if (!nowIsIdle && wasIdle) {
-      // Just returned from idle — keep recovery slow for 50s
       postAlertSlowUntil = Math.max(postAlertSlowUntil, now + 50_000);
     }
     wasIdle = nowIsIdle;
 
-    const { score: rawScore, hardDist } = computeLiveWindowScore(
-      sessionState.activityLog,
-      sessionState.windowEvents,
-      sessionState.sessionData,
-      idleSecs,
-      sessionState.aiAnalyses,
-    );
-    if (emaScore === null) {
-      emaScore = rawScore;
-    } else if (hardDist) {
-      emaScore = rawScore; // snap immediately on hard distraction
-    } else if (rawScore < emaScore) {
-      emaScore = emaScore * 0.45 + rawScore * 0.55; // fast fall
-    } else {
-      // Rising: very slow after alert/idle, normal otherwise
-      const w = now < postAlertSlowUntil ? 0.07 : 0.25;
-      emaScore = emaScore * (1 - w) + rawScore * w;
+    // Compute work score every 2 ticks (2s), update timer every tick (1s)
+    if (tickCount % 2 === 0) {
+      const { score: rawScore, hardDist } = computeLiveWindowScore(
+        sessionState.activityLog,
+        sessionState.windowEvents,
+        sessionState.sessionData,
+        idleSecs,
+        sessionState.aiAnalyses,
+      );
+      if (emaScore === null) {
+        emaScore = rawScore;
+      } else if (hardDist) {
+        emaScore = rawScore;
+      } else if (rawScore < emaScore) {
+        emaScore = emaScore * 0.42 + rawScore * 0.58;
+      } else {
+        const w = now < postAlertSlowUntil ? 0.05 : 0.09;
+        emaScore = emaScore * (1 - w) + rawScore * w;
+      }
+
+      // Sustained focus bonus: accumulates when EMA stays high, evaporates on distraction
+      if (emaScore >= 55) {
+        sessionState.sustainedFocusTicks = Math.min(480, (sessionState.sustainedFocusTicks || 0) + 1);
+      } else {
+        sessionState.sustainedFocusTicks = Math.max(0, (sessionState.sustainedFocusTicks || 0) - 5);
+      }
     }
-    const liveScore = Math.round(emaScore);
+    const sustainBonus = Math.min(22, (sessionState.sustainedFocusTicks || 0) / 22);
+    // Phone active penalty — applied to displayed score only (not EMA)
+    const liveScore = (() => {
+      let s = Math.min(95, Math.round((emaScore ?? 50) + sustainBonus));
+      if (sessionState.activePhoneEvent) {
+        const phoneActiveSecs = (now - sessionState.activePhoneEvent.startedAt) / 1000;
+        const penalty = Math.min(40, 12 + phoneActiveSecs / 5);
+        s = Math.max(5, s - Math.round(penalty));
+      }
+      return s;
+    })();
 
     const elapsedMin = Math.floor(elapsed / 60);
     if (elapsedMin > sessionState.lastSeriesMinute) {
@@ -733,20 +948,25 @@ function startTracking() {
       currentApp:   currentApp?.app   || '',
       currentTitle: currentApp?.title || '',
       idleSecs,
+      targetScore,
+      phoneActive: !!sessionState.activePhoneEvent,
       phoneCount: sessionState.phoneEvents.filter(e => e.endedAt).length +
                   (sessionState.activePhoneEvent ? 1 : 0),
     };
     mainWindow.webContents.send('session:update', update);
     widgetWindow?.webContents.send('session:update', update);
 
-    // Alert when entering red zone
-    const nowZone = liveScore < 20 ? 'red' : 'ok';
-    if (nowZone === 'red' && prevLiveZone !== 'red' && Date.now() > alertCooldownUntil) {
-      showAlert(liveScore);
-      alertCooldownUntil = Date.now() + 90_000; // 90s cooldown
+    // Alert when entering red zone or dropping below target (check every 2s)
+    if (tickCount % 2 === 0) {
+      const threshold = targetScore ?? 20;
+      const nowZone = liveScore < threshold ? 'red' : 'ok';
+      if (nowZone === 'red' && prevLiveZone !== 'red' && Date.now() > alertCooldownUntil) {
+        showAlert(liveScore);
+        alertCooldownUntil = Date.now() + 90_000;
+      }
+      prevLiveZone = nowZone;
     }
-    prevLiveZone = nowZone;
-  }, 2000);
+  }, 1000);
 }
 
 function stopTracking() {
@@ -755,6 +975,7 @@ function stopTracking() {
   destroyWidget();
   destroyAlert();
   prevLiveZone = null;
+  targetScore  = null;
 }
 
 // ─── IPC Handlers ─────────────────────────────────────────────────────────────
@@ -765,16 +986,18 @@ ipcMain.handle('session:start', async (_, data) => {
   emaScore           = null;
   postAlertSlowUntil = 0;
   wasIdle            = false;
+  targetScore        = data.targetScore ?? null;
   sessionState = {
-    sessionData:      { ...data, startedAt: Date.now() },
-    windowEvents:     [],
-    idleEvents:       [],
-    phoneEvents:      [],
-    activePhoneEvent: null,
-    aiAnalyses:       [],
-    activityLog:      [],
-    scoreSeries:      [],
-    lastSeriesMinute: -1,
+    sessionData:         { ...data, startedAt: Date.now() },
+    windowEvents:        [],
+    idleEvents:          [],
+    phoneEvents:         [],
+    activePhoneEvent:    null,
+    aiAnalyses:          [],
+    activityLog:         [],
+    scoreSeries:         [],
+    lastSeriesMinute:    -1,
+    sustainedFocusTicks: 0,
   };
   startTracking();
   return { ok: true };
@@ -810,12 +1033,20 @@ ipcMain.handle('session:end', async () => {
     score.phoneDistractionCount,
   );
 
+  // AI-generated personalized note (Anthropic API, non-blocking)
+  const config  = loadConfig();
+  const aiNote  = await generateAINote(
+    sessionState.sessionData,
+    { ...score, durationMinutes: durMin },
+    config.apiKey,
+  ).catch(() => null);
+
   const completed = {
     ...sessionState.sessionData,
     endedAt,
     durationMinutes: durMin,
     ...score,
-    positiveReasons,
+    positiveReasons: aiNote ? [aiNote, ...positiveReasons].slice(0, 3) : positiveReasons,
     negativeReasons,
     phoneDistractionEvents: sessionState.phoneEvents,
     scoreSeries: sessionState.scoreSeries,
@@ -873,12 +1104,202 @@ ipcMain.handle('permissions:screen', () => {
   return { status };
 });
 
+ipcMain.handle('context:detect', async () => {
+  const win = await getActiveWindow();
+  if (!win) return null;
+  const appLower = win.app.toLowerCase();
+  let category = 'General Work';
+  for (const [cat, keywords] of Object.entries(CATEGORY_APPS)) {
+    if (cat === 'Free Work') continue;
+    if (keywords.some(k => appLower.includes(k))) { category = cat; break; }
+  }
+  // Derive a clean title: use window title if short and meaningful, else app name
+  const rawTitle = win.title?.trim() || '';
+  const title = rawTitle.length > 0 && rawTitle.length < 60 ? rawTitle : win.app;
+  return { app: win.app, title, category };
+});
+
 ipcMain.handle('clipboard:write', (_, text) => { clipboard.writeText(text); return { ok: true }; });
 ipcMain.handle('shell:open',      (_, url)  => { shell.openExternal(url);   return { ok: true }; });
+ipcMain.handle('qr:generate',     (_, url)  => QRCode.toDataURL(url, { width: 200, margin: 2, color: { dark: '#06060a', light: '#ffffff' } }));
+ipcMain.on('widget:mouse', (_, ignore) => {
+  if (widgetIsDragging) return; // keep mouse captured during drag
+  widgetWindow?.setIgnoreMouseEvents(ignore, { forward: true });
+});
+
+ipcMain.on('widget:tap',        () => focusMainWindow());
+ipcMain.on('widget:drag-start', () => startWidgetDrag());
+ipcMain.on('widget:drag-end',   () => endWidgetDrag());
+
+// Theme forwarding: main window → widget window
+ipcMain.on('theme:set', (_, theme) => {
+  widgetWindow?.webContents.send('theme:change', theme);
+});
+
+// ─── Auto-updater (self-rolled, no Apple signing) ────────────────────────────
+
+let downloadedUpdatePath = null;
+let downloadedUpdateVersion = null;
+let downloadingUpdate = false;
+
+function pickDmgAsset(assets) {
+  const arch = process.arch; // 'arm64' or 'x64'
+  const archDmg = assets.find(a => a.name && a.name.toLowerCase().endsWith(`-${arch}.dmg`));
+  if (archDmg) return archDmg;
+  return assets.find(a => a.name && a.name.toLowerCase().endsWith('.dmg'));
+}
+
+function downloadToFile(url, destPath, onProgress, redirectsLeft = 5) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers: { 'User-Agent': 'surzo-desktop' } }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        if (redirectsLeft <= 0) return reject(new Error('too many redirects'));
+        res.resume();
+        return downloadToFile(res.headers.location, destPath, onProgress, redirectsLeft - 1)
+          .then(resolve, reject);
+      }
+      if (res.statusCode !== 200) {
+        res.resume();
+        return reject(new Error(`HTTP ${res.statusCode}`));
+      }
+      const total = parseInt(res.headers['content-length'] || '0', 10);
+      let received = 0;
+      const file = fs.createWriteStream(destPath);
+      res.on('data', (chunk) => {
+        received += chunk.length;
+        if (total && onProgress) onProgress(received / total);
+      });
+      res.pipe(file);
+      file.on('finish', () => file.close(() => resolve()));
+      file.on('error', (e) => { try { fs.unlinkSync(destPath); } catch {} ; reject(e); });
+    });
+    req.on('error', reject);
+  });
+}
+
+async function checkForUpdates() {
+  if (process.platform !== 'darwin') return;
+  if (downloadingUpdate || downloadedUpdatePath) return;
+  try {
+    const config = loadConfig();
+    const repoSlug = config.githubRepo || 'sakujun1129/surzo';
+    if (!repoSlug) return;
+    const res = await fetch(`https://api.github.com/repos/${repoSlug}/releases/latest`, {
+      headers: { 'Accept': 'application/vnd.github+json', 'User-Agent': 'surzo-desktop' },
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const latestTag = (data.tag_name || '').replace(/^v/, '');
+    if (!latestTag) return;
+    const current = app.getVersion();
+    if (latestTag === current) return;
+
+    const asset = pickDmgAsset(data.assets || []);
+    const fallbackUrl = data.html_url || `https://github.com/${repoSlug}/releases/latest`;
+
+    mainWindow?.webContents.send('update:available', {
+      version: latestTag,
+      url: fallbackUrl,
+      notes: (data.body || '').slice(0, 280),
+      autoApply: !!asset,
+    });
+
+    if (!asset) return;
+
+    downloadingUpdate = true;
+    const dest = path.join(app.getPath('temp'), `surzo-update-${latestTag}.dmg`);
+    try { fs.unlinkSync(dest); } catch {}
+    await downloadToFile(asset.browser_download_url, dest, (p) => {
+      mainWindow?.webContents.send('update:progress', { percent: Math.round(p * 100) });
+    });
+    downloadedUpdatePath = dest;
+    downloadedUpdateVersion = latestTag;
+    downloadingUpdate = false;
+    mainWindow?.webContents.send('update:downloaded', { version: latestTag });
+  } catch (_e) {
+    downloadingUpdate = false;
+  }
+}
+
+function applyDownloadedUpdate() {
+  if (process.platform !== 'darwin') return false;
+  if (!downloadedUpdatePath || !fs.existsSync(downloadedUpdatePath)) return false;
+
+  // /Applications/Surzo.app/Contents/MacOS/Surzo → /Applications/Surzo.app
+  const exePath = app.getPath('exe');
+  const appBundle = path.dirname(path.dirname(path.dirname(exePath)));
+  if (!appBundle.endsWith('.app')) return false;
+
+  const stamp = Date.now();
+  const scriptPath = path.join(app.getPath('temp'), `surzo-apply-update-${stamp}.sh`);
+  const logPath    = path.join(app.getPath('temp'), 'surzo-update.log');
+  const pid = process.pid;
+  const dmg = downloadedUpdatePath;
+
+  const script = `#!/bin/bash
+exec > "${logPath}" 2>&1
+echo "[$(date)] waiting for pid ${pid}"
+for i in $(seq 1 100); do
+  kill -0 ${pid} 2>/dev/null || break
+  sleep 0.2
+done
+sleep 0.5
+
+MOUNT=$(mktemp -d -t surzo-upd)
+echo "[$(date)] mounting ${dmg} at $MOUNT"
+hdiutil attach "${dmg}" -nobrowse -noautoopen -mountpoint "$MOUNT" >/dev/null || { echo "mount failed"; exit 1; }
+
+SRC=$(find "$MOUNT" -maxdepth 2 -name "*.app" -type d | head -n 1)
+if [ -z "$SRC" ]; then
+  echo "no .app found in DMG"
+  hdiutil detach "$MOUNT" -force >/dev/null 2>&1 || true
+  exit 1
+fi
+
+BACKUP="${appBundle}.old-${stamp}"
+echo "[$(date)] replacing ${appBundle} (backup: $BACKUP)"
+mv "${appBundle}" "$BACKUP" || { echo "backup move failed"; hdiutil detach "$MOUNT" -force >/dev/null 2>&1; exit 1; }
+if cp -R "$SRC" "${appBundle}"; then
+  rm -rf "$BACKUP"
+else
+  echo "copy failed — rolling back"
+  rm -rf "${appBundle}"
+  mv "$BACKUP" "${appBundle}"
+  hdiutil detach "$MOUNT" -force >/dev/null 2>&1
+  exit 1
+fi
+xattr -dr com.apple.quarantine "${appBundle}" 2>/dev/null || true
+
+hdiutil detach "$MOUNT" -force >/dev/null 2>&1 || true
+rm -rf "$MOUNT"
+rm -f "${dmg}"
+
+echo "[$(date)] launching ${appBundle}"
+open "${appBundle}"
+rm -f "$0"
+`;
+
+  try {
+    fs.writeFileSync(scriptPath, script, { mode: 0o755 });
+  } catch (_e) {
+    return false;
+  }
+
+  const child = spawn('/bin/bash', [scriptPath], { detached: true, stdio: 'ignore' });
+  child.unref();
+
+  // Quit so the script can replace this bundle.
+  setTimeout(() => app.quit(), 300);
+  return true;
+}
+
+ipcMain.handle('update:apply', () => applyDownloadedUpdate());
+ipcMain.handle('update:check', () => { checkForUpdates(); return true; });
 
 // ─── App Lifecycle ────────────────────────────────────────────────────────────
 
 function createWindow() {
+  if (!sessionState) destroyWidget(); // only clean up orphan widget if no active session
   mainWindow = new BrowserWindow({
     width:  460,
     height: 580,
@@ -900,13 +1321,28 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
 
-  mainWindow.on('closed', () => { mainWindow = null; });
+  mainWindow.on('closed', () => {
+    if (!sessionState) destroyWidget(); // keep widget alive during active session
+    mainWindow = null;
+  });
 }
 
 app.whenReady().then(() => {
+  // Auto-launch at login so the app is always listening for remote start commands from mobile
+  try {
+    app.setLoginItemSettings({ openAtLogin: true, openAsHidden: false });
+  } catch (_e) {}
+  // Dev-mode dock icon (in packaged builds the bundle icon is used)
+  try {
+    if (isDev && app.dock) {
+      const iconPath = path.join(__dirname, '..', 'build', 'icon.png');
+      if (fs.existsSync(iconPath)) app.dock.setIcon(iconPath);
+    }
+  } catch (_e) {}
   createWindow();
-  // Warm up permission check after a short delay
   setTimeout(probePermission, 1500);
+  setTimeout(checkForUpdates, 6000);
+  setInterval(checkForUpdates, 60 * 60 * 1000); // re-check every hour
 });
 
 app.on('window-all-closed', () => {

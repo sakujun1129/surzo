@@ -35,34 +35,45 @@ async function saveLocalSession(session) {
   localStorage.setItem('surzo_v1', JSON.stringify(all));
 }
 
+function withTimeout(promise, ms) {
+  return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+}
+
 export async function getSessions() {
-  if (supabase) {
-    const uid = getUserId();
-    const [{ data, error }, { data: photos }] = await Promise.all([
-      supabase.from('sessions').select('data').eq('user_id', uid).order('created_at', { ascending: false }),
-      supabase.from('session_photos').select('session_id, photo_url').eq('user_id', uid),
-    ]);
-    if (!error && data) {
-      const photoMap = Object.fromEntries((photos ?? []).map(p => [p.session_id, p.photo_url]));
-      return data.map(r => {
-        const s = r.data;
-        if (!s.photoUri?.startsWith('https://') && photoMap[s.id]) s.photoUri = photoMap[s.id];
-        return s;
-      });
-    }
+  const uid = getUserId();
+  if (supabase && uid) {
+    try {
+      const [{ data, error }, { data: photos }] = await withTimeout(Promise.all([
+        supabase.from('sessions').select('data').eq('user_id', uid).order('created_at', { ascending: false }),
+        supabase.from('session_photos').select('session_id, photo_url').eq('user_id', uid),
+      ]), 6000);
+      if (!error && data?.length > 0) {
+        const photoMap = Object.fromEntries((photos ?? []).map(p => [p.session_id, p.photo_url]));
+        return data.map(r => {
+          const s = r.data;
+          if (!s.photoUri?.startsWith('https://') && photoMap[s.id]) s.photoUri = photoMap[s.id];
+          return s;
+        });
+      }
+    } catch {}
   }
   return getLocalSessions();
 }
 
 export async function saveSession(session) {
-  if (supabase) {
-    const { error } = await supabase.from('sessions').upsert({
-      id: session.id,
-      user_id: getUserId(),
-      data: session,
-      updated_at: new Date().toISOString(),
-    });
-    if (error) console.error('[supabase] saveSession error:', error);
+  const uid = getUserId();
+  if (supabase && uid) {
+    try {
+      const { error } = await withTimeout(supabase.from('sessions').upsert({
+        id: session.id,
+        user_id: uid,
+        data: session,
+        updated_at: new Date().toISOString(),
+      }), 6000);
+      if (error) console.error('[supabase] saveSession error:', error);
+      // Refresh leaderboard profile stats in background
+      refreshMyProfileStats().catch(() => {});
+    } catch {}
   }
   return saveLocalSession(session);
 }
@@ -214,6 +225,248 @@ export function subscribeSessionPhoto(sessionId, onPhoto) {
     }, p => { if (p.new?.photo_url) onPhoto(p.new.photo_url); })
     .subscribe();
   return () => supabase.removeChannel(ch);
+}
+
+// ─── Social: user profile / leaderboard / friends ────────────────────────────
+
+export async function getMyEmail() {
+  if (!supabase) return null;
+  const { data } = await supabase.auth.getUser();
+  return data?.user?.email ?? null;
+}
+
+export async function ensureMyProfile() {
+  if (!supabase) return null;
+  const uid = getUserId();
+  if (!uid) return null;
+  const { data } = await supabase.auth.getUser();
+  const email = data?.user?.email ?? '';
+  const handle = email.split('@')[0] || 'user';
+  await supabase.from('user_profiles').upsert({
+    id: uid,
+    email_handle: handle,
+    display_name: handle,
+  }, { onConflict: 'id', ignoreDuplicates: false });
+  // Don't overwrite display_name if it already exists
+  const { data: existing } = await supabase.from('user_profiles').select('*').eq('id', uid).maybeSingle();
+  return existing;
+}
+
+function isSameDay(a, b) {
+  const da = new Date(a), db = new Date(b);
+  return da.getFullYear() === db.getFullYear() &&
+    da.getMonth() === db.getMonth() &&
+    da.getDate() === db.getDate();
+}
+
+export async function refreshMyProfileStats() {
+  if (!supabase) return;
+  const uid = getUserId();
+  if (!uid) return;
+  try {
+    const sessions = await getSessions();
+    if (!sessions?.length) return;
+    const calcPts = (x) => Math.round((x.averageWorkScore || 0) * (x.durationMinutes || 1));
+
+    const total = sessions.reduce((s, x) => s + calcPts(x), 0);
+    const avg = Math.round(sessions.reduce((s, x) => s + (x.averageWorkScore || 0), 0) / sessions.length);
+
+    const now = Date.now();
+    const today = sessions.filter(x => x.startedAt && isSameDay(x.startedAt, now));
+    const dailyPts = today.reduce((s, x) => s + calcPts(x), 0);
+    const dailyAvg = today.length ? Math.round(today.reduce((s, x) => s + (x.averageWorkScore || 0), 0) / today.length) : 0;
+    const todayISO = new Date(now).toISOString().slice(0, 10);
+
+    const last = sessions[0];
+
+    // Always-exists columns first
+    const baseUpdate = {
+      total_pts: total,
+      avg_score: avg,
+      sessions_count: sessions.length,
+      last_session_at: last?.startedAt ? new Date(last.startedAt).toISOString() : null,
+      updated_at: new Date().toISOString(),
+    };
+    const { error: e1 } = await supabase.from('user_profiles').update(baseUpdate).eq('id', uid);
+    if (e1) console.warn('[profile] base update failed', e1);
+
+    // Daily columns may not exist yet (SQL migration). Update separately so a failure here
+    // doesn't roll back the base stats.
+    try {
+      await supabase.from('user_profiles').update({
+        daily_pts: dailyPts,
+        daily_avg: dailyAvg,
+        daily_sessions: today.length,
+        daily_date: todayISO,
+      }).eq('id', uid);
+    } catch (_e) {}
+  } catch (e) { console.warn('[profile] refresh failed', e); }
+}
+
+export async function updateDisplayName(name) {
+  if (!supabase) return;
+  const uid = getUserId();
+  if (!uid) return;
+  await supabase.from('user_profiles').update({
+    display_name: name, updated_at: new Date().toISOString(),
+  }).eq('id', uid);
+}
+
+// scope: 'all_time' | 'daily'
+// metric: 'total' | 'avg'
+export async function getLeaderboard({ scope = 'all_time', metric = 'total', limit = 50 } = {}) {
+  if (!supabase) return [];
+  let col;
+  if (scope === 'daily') {
+    col = metric === 'avg' ? 'daily_avg' : 'daily_pts';
+  } else {
+    col = metric === 'avg' ? 'avg_score' : 'total_pts';
+  }
+  let q = supabase.from('user_profiles').select('*').gt(col, 0)
+    .order(col, { ascending: false }).limit(limit);
+  if (scope === 'daily') {
+    const today = new Date().toISOString().slice(0, 10);
+    q = q.eq('daily_date', today);
+  }
+  const { data } = await q;
+  return data ?? [];
+}
+
+export async function searchUsersByName(query, limit = 20) {
+  if (!supabase || !query?.trim()) return [];
+  const uid = getUserId();
+  const q = query.trim().replace(/[%_]/g, ''); // sanitize SQL wildcards
+  let req = supabase.from('user_profiles')
+    .select('*')
+    .ilike('display_name', `%${q}%`)
+    .order('total_pts', { ascending: false })
+    .limit(limit);
+  if (uid) req = req.neq('id', uid);
+  const { data } = await req;
+  return data ?? [];
+}
+
+export async function getUserProfile(userId) {
+  if (!supabase) return null;
+  const { data } = await supabase.from('user_profiles').select('*').eq('id', userId).maybeSingle();
+  return data;
+}
+
+// Top 3 sessions for a user (by total pts) — works only for self or accepted friends due to RLS
+export async function getUserTopSessions(userId, limit = 3) {
+  if (!supabase) return [];
+  const { data } = await supabase.from('sessions')
+    .select('data')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(50);
+  const sessions = (data ?? []).map(r => r.data).filter(Boolean);
+  // Sort by total pts desc
+  return sessions.map(s => {
+    const avg = Math.round(s.averageWorkScore ?? 0);
+    const mins = s.durationMinutes || 1;
+    const raw = s.totalWorkScore;
+    const pts = Math.round(avg * mins);
+    return { ...s, _pts: pts };
+  }).sort((a, b) => b._pts - a._pts).slice(0, limit);
+}
+
+export async function getFriendships() {
+  if (!supabase) return [];
+  const uid = getUserId();
+  if (!uid) return [];
+  const { data } = await supabase.from('friendships').select('*')
+    .or(`requester_id.eq.${uid},addressee_id.eq.${uid}`);
+  return data ?? [];
+}
+
+export async function getFriendStatusWith(otherUserId) {
+  if (!supabase) return 'none';
+  const uid = getUserId();
+  if (!uid) return 'none';
+  const { data } = await supabase.from('friendships').select('*')
+    .or(`and(requester_id.eq.${uid},addressee_id.eq.${otherUserId}),and(requester_id.eq.${otherUserId},addressee_id.eq.${uid})`)
+    .maybeSingle();
+  if (!data) return 'none';
+  if (data.status === 'accepted') return 'accepted';
+  if (data.requester_id === uid) return 'sent';
+  return 'received';
+}
+
+export async function sendFriendRequest(targetUserId) {
+  if (!supabase) return { ok: false };
+  const uid = getUserId();
+  if (!uid || uid === targetUserId) return { ok: false };
+  const { error } = await supabase.from('friendships').upsert(
+    { requester_id: uid, addressee_id: targetUserId, status: 'pending' },
+    { onConflict: 'requester_id,addressee_id' }
+  );
+  return { ok: !error };
+}
+
+export async function acceptFriendRequest(friendshipId) {
+  if (!supabase) return { ok: false };
+  const { error } = await supabase.from('friendships').update({
+    status: 'accepted', updated_at: new Date().toISOString(),
+  }).eq('id', friendshipId);
+  return { ok: !error };
+}
+
+export async function removeFriendship(friendshipId) {
+  if (!supabase) return { ok: false };
+  const { error } = await supabase.from('friendships').delete().eq('id', friendshipId);
+  return { ok: !error };
+}
+
+// Get accepted friends with their profile
+export async function getFriendsList() {
+  if (!supabase) return [];
+  const uid = getUserId();
+  if (!uid) return [];
+  const ships = await getFriendships();
+  const accepted = ships.filter(f => f.status === 'accepted');
+  if (!accepted.length) return [];
+  const friendIds = accepted.map(f => f.requester_id === uid ? f.addressee_id : f.requester_id);
+  const { data: profiles } = await supabase.from('user_profiles').select('*').in('id', friendIds);
+  return (profiles ?? []).map(p => {
+    const ship = accepted.find(f => f.requester_id === p.id || f.addressee_id === p.id);
+    return { ...p, friendship_id: ship.id };
+  });
+}
+
+// Get pending requests received
+export async function getPendingRequests() {
+  if (!supabase) return [];
+  const uid = getUserId();
+  if (!uid) return [];
+  const { data: ships } = await supabase.from('friendships')
+    .select('*').eq('addressee_id', uid).eq('status', 'pending');
+  if (!ships?.length) return [];
+  const ids = ships.map(s => s.requester_id);
+  const { data: profiles } = await supabase.from('user_profiles').select('*').in('id', ids);
+  return (profiles ?? []).map(p => {
+    const ship = ships.find(s => s.requester_id === p.id);
+    return { ...p, friendship_id: ship.id };
+  });
+}
+
+// BeReal-style feed: recent sessions from friends (with photos)
+export async function getFriendsFeed(limit = 30) {
+  if (!supabase) return [];
+  const friends = await getFriendsList();
+  if (!friends.length) return [];
+  const friendIds = friends.map(f => f.id);
+  const profileById = Object.fromEntries(friends.map(f => [f.id, f]));
+  const { data } = await supabase.from('sessions')
+    .select('user_id, data, created_at')
+    .in('user_id', friendIds)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  return (data ?? []).map(r => ({
+    user: profileById[r.user_id],
+    session: r.data,
+    created_at: r.created_at,
+  })).filter(x => x.user && x.session);
 }
 
 export async function sendMobileAlert(score) {

@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <!-- macOS squircle clip — flat-ish sides, only corners curve -->
+    <clipPath id="squircle">
+      <path d="M 360 0
+               L 664 0
+               C 880 0 1024 144 1024 360
+               L 1024 664
+               C 1024 880 880 1024 664 1024
+               L 360 1024
+               C 144 1024 0 880 0 664
+               L 0 360
+               C 0 144 144 0 360 0 Z"/>
+    </clipPath>
+
+    <!-- Background: rich dark with subtle warmth top → cool bottom -->
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#1c1c22"/>
+      <stop offset="55%" stop-color="#0a0a0d"/>
+      <stop offset="100%" stop-color="#040406"/>
+    </linearGradient>
+
+    <!-- Lime brand color with vertical sheen -->
+    <linearGradient id="lime" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#e9ff8e"/>
+      <stop offset="48%"  stop-color="#d4f57a"/>
+      <stop offset="100%" stop-color="#b3da4d"/>
+    </linearGradient>
+
+    <!-- Top inner light, hint of brand color -->
+    <radialGradient id="topGlow" cx="0.5" cy="-0.08" r="0.85" fx="0.5" fy="-0.08">
+      <stop offset="0%"   stop-color="#d4f57a" stop-opacity="0.20"/>
+      <stop offset="55%"  stop-color="#d4f57a" stop-opacity="0.04"/>
+      <stop offset="100%" stop-color="#d4f57a" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Soft glow behind the z -->
+    <radialGradient id="zHalo" cx="0.5" cy="0.55" r="0.45">
+      <stop offset="0%"   stop-color="#d4f57a" stop-opacity="0.22"/>
+      <stop offset="60%"  stop-color="#d4f57a" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#d4f57a" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Subtle drop shadow under z -->
+    <filter id="zShadow" x="-20%" y="-15%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="16"/>
+      <feOffset dy="10"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.45"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <!-- Top-edge gloss on z (thin lighter band) -->
+    <linearGradient id="zGloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <g clip-path="url(#squircle)">
+    <!-- Base -->
+    <rect width="1024" height="1024" fill="url(#bg)"/>
+    <!-- Top accent glow -->
+    <rect width="1024" height="1024" fill="url(#topGlow)"/>
+    <!-- Halo behind z -->
+    <rect width="1024" height="1024" fill="url(#zHalo)"/>
+
+    <!-- Inner border line for depth -->
+    <path d="M 360 4
+             L 664 4
+             C 878 4 1020 146 1020 360
+             L 1020 664
+             C 1020 878 878 1020 664 1020
+             L 360 1020
+             C 146 1020 4 878 4 664
+             L 4 360
+             C 4 146 146 4 360 4 Z"
+          fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="2"/>
+
+    <!-- The lowercase z, single union path -->
+    <!-- Top bar:    y 344..424  -->
+    <!-- Bottom bar: y 600..680  -->
+    <!-- Diagonal:   96px wide   -->
+    <g filter="url(#zShadow)">
+      <path d="M 288 344
+               L 736 344
+               L 736 424
+               L 384 600
+               L 736 600
+               L 736 680
+               L 288 680
+               L 288 600
+               L 640 424
+               L 288 424 Z"
+            fill="url(#lime)"/>
+    </g>
+
+    <!-- Glossy top edges on the two horizontal bars -->
+    <path d="M 288 344 L 736 344 L 736 358 L 288 358 Z" fill="url(#zGloss)"/>
+    <path d="M 288 600 L 736 600 L 736 614 L 288 614 Z" fill="url(#zGloss)" opacity="0.65"/>
+
+    <!-- Tiny focus dot, lower-right of canvas — alludes to live tracking -->
+    <circle cx="812" cy="780" r="14" fill="#d4f57a"/>
+    <circle cx="812" cy="780" r="26" fill="none" stroke="#d4f57a" stroke-width="2" stroke-opacity="0.35"/>
+  </g>
+</svg>

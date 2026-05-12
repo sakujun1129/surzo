@@ -10,6 +10,7 @@
     "ios": { "bundleIdentifier": "jp.surzo.mobile" },
     "android": { "package": "jp.surzo.mobile" },
     "plugins": ["expo-router"],
-    "newArchEnabled": false
+    "newArchEnabled": false,
+    "web": { "bundler": "metro", "output": "single" }
   }
 }

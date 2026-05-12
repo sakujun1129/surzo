@@ -1,0 +1,7 @@
+node_modules
+surzo-mobile
+surzo-app
+dist
+web-build
+.expo
+*.dmg

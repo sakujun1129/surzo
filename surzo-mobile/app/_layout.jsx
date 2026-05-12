@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, Modal, Dimensions, StyleSheet,
+  View, Text, FlatList, TouchableOpacity, Modal, Dimensions, StyleSheet, Platform,
 } from 'react-native';
 import { Tabs, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -84,13 +84,15 @@ const ob = StyleSheet.create({
   btnNextText: { color: '#000', fontSize: 15, fontWeight: '700' },
 });
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+if (Platform.OS !== 'web') {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+}
 
 const TAB = { backgroundColor: '#000', borderTopColor: '#111', paddingTop: 4 };
 const opts = (title, icon) => ({
@@ -103,7 +105,7 @@ export default function RootLayout() {
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   useEffect(() => {
-    Notifications.requestPermissionsAsync();
+    if (Platform.OS !== 'web') Notifications.requestPermissionsAsync();
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) router.replace('/pair');
     });
@@ -137,7 +139,7 @@ export default function RootLayout() {
         <Tabs.Screen name="ranking" options={opts('Ranking', 'trophy-outline')} />
         <Tabs.Screen name="profile" options={opts('Profile', 'person-outline')} />
         <Tabs.Screen name="session/[id]" options={{ href: null }} />
-        <Tabs.Screen name="pair"         options={{ href: null }} />
+        <Tabs.Screen name="pair"         options={{ href: null, tabBarStyle: { display: 'none' } }} />
       </Tabs>
     </>
   );

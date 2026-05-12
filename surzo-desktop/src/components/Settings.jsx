@@ -1,14 +1,25 @@
 import { useState, useEffect } from 'react';
 import { Card } from './ui.jsx';
-import { generatePairingCode } from '../utils/storage.js';
+import QRCode from 'qrcode';
+
+const MOBILE_URL = 'https://surzo-app.vercel.app';
 
 export default function Settings({ onBack, theme, onToggleTheme }) {
   const [aiEnabled,    setAiEnabled]    = useState(false);
   const [screenStatus, setScreenStatus] = useState('unknown');
   const [ollamaStatus, setOllamaStatus] = useState('checking');
   const [saved,        setSaved]        = useState(false);
-  const [pairCode,     setPairCode]     = useState(null);
-  const [pairLoading,  setPairLoading]  = useState(false);
+  const [qrDataUrl,    setQrDataUrl]    = useState('');
+  const [urlCopied,    setUrlCopied]    = useState(false);
+
+  const generateQR = async () => {
+    try {
+      const svg = await QRCode.toString(MOBILE_URL, { type: 'svg', width: 200, margin: 2 });
+      setQrDataUrl('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg));
+    } catch (e) {
+      console.error('[QR]', e);
+    }
+  };
 
   useEffect(() => {
     window.electronAPI?.getConfig().then(cfg => {
@@ -38,6 +49,16 @@ export default function Settings({ onBack, theme, onToggleTheme }) {
     await window.electronAPI?.setConfig({ aiEnabled });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  };
+
+  const handleCopyUrl = async () => {
+    if (window.electronAPI?.writeToClipboard) {
+      await window.electronAPI.writeToClipboard(MOBILE_URL);
+    } else {
+      await navigator.clipboard.writeText(MOBILE_URL).catch(() => {});
+    }
+    setUrlCopied(true);
+    setTimeout(() => setUrlCopied(false), 2000);
   };
 
   const screenGranted = screenStatus === 'granted';
@@ -144,30 +165,38 @@ export default function Settings({ onBack, theme, onToggleTheme }) {
           </div>
         </Card>
 
-        {/* Link Phone */}
+        {/* Mobile App */}
         <div className="text-stone-400 dark:text-zinc-500 text-xs uppercase tracking-widest mb-3">Mobile App</div>
         <Card className="p-4 mb-6">
-          <div className="text-sm font-semibold mb-1">スマホと連携</div>
-          <div className="text-stone-400 dark:text-zinc-500 text-xs mb-4">6桁のコードをスマホアプリに入力してください。10分間有効です。</div>
-          {pairCode ? (
-            <div className="text-center">
-              <div className="text-4xl font-black tracking-[0.3em] text-lime-400 mb-2">{pairCode}</div>
-              <div className="text-stone-400 dark:text-zinc-500 text-xs">スマホアプリで上記コードを入力</div>
-            </div>
-          ) : (
+          <div className="text-sm font-semibold mb-3">スマホ版を開く</div>
+
+          {/* URL row: tap to copy + QR button */}
+          <div className="flex items-center gap-2">
             <button
-              onClick={async () => {
-                setPairLoading(true);
-                const code = await generatePairingCode();
-                setPairCode(code);
-                setPairLoading(false);
-                setTimeout(() => setPairCode(null), 10 * 60 * 1000);
-              }}
-              disabled={pairLoading}
-              className="w-full py-3 rounded-2xl bg-lime-300 hover:bg-lime-200 active:scale-[.98] text-zinc-950 font-bold text-sm transition-all disabled:opacity-50"
+              onClick={handleCopyUrl}
+              className="flex-1 text-left text-xs font-mono truncate px-3 py-2.5 rounded-xl bg-stone-100 dark:bg-zinc-800 text-stone-500 dark:text-zinc-400 hover:opacity-70 transition-opacity"
             >
-              {pairLoading ? 'Generating…' : 'コードを生成'}
+              {urlCopied ? '✓ コピーしました' : MOBILE_URL}
             </button>
+            <button
+              onClick={generateQR}
+              className="flex-shrink-0 px-4 py-2.5 rounded-xl text-sm font-bold active:scale-[.97] transition-transform"
+              style={{ background: 'var(--accent)', color: '#06060a' }}
+            >
+              QR
+            </button>
+          </div>
+
+          {/* QR code — appears after button press */}
+          {qrDataUrl && (
+            <div className="flex flex-col items-center mt-4">
+              <div className="rounded-2xl overflow-hidden" style={{ background: '#fff', padding: 10 }}>
+                <img src={qrDataUrl} alt="QR code" style={{ width: 160, height: 160, display: 'block' }} />
+              </div>
+              <p className="text-xs text-center mt-2" style={{ color: 'var(--text-sub)' }}>
+                スマホのカメラでスキャン
+              </p>
+            </div>
           )}
         </Card>
 
