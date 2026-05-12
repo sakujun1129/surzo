@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { fmtTimer, scoreColor } from '../utils/format.js';
 import { CAT_ICON } from '../utils/categories.js';
-import { saveSession, setLiveSession, clearLiveSession, subscribePhoneEvents, updateLiveScore, sendMobileAlert, subscribeSessionPhoto, getSessionPhoto, getSessionPhotos, addSessionPhoto } from '../utils/storage.js';
+import { saveSession, setLiveSession, clearLiveSession, subscribePhoneEvents, sendMobileAlert, subscribeSessionPhoto, getSessionPhoto, getSessionPhotos, addSessionPhoto } from '../utils/storage.js';
 
 function getZone(score) {
   const color = scoreColor(score);
@@ -45,15 +45,8 @@ export default function ActiveSession({ sessionData, onEnd }) {
       });
       scoreHistory.current.push(data.liveScore);
       if (scoreHistory.current.length > 30) scoreHistory.current.shift();
-
-      const now = Date.now();
-      const phoneChanged = data.phoneCount !== lastPhoneCount.current;
-      // Write immediately on phone_count change so mobile sees the new count fast
-      if (phoneChanged || now - lastScoreWrite.current > 5000) {
-        updateLiveScore(data.liveScore, data.elapsed, data.currentApp, data.phoneCount);
-        lastScoreWrite.current = now;
-        lastPhoneCount.current = data.phoneCount;
-      }
+      // Live-session writes are now driven by the main process at 1Hz so they
+      // keep flowing even when the renderer is on a different screen.
     });
     return () => unsub?.();
   }, []);

@@ -655,6 +655,8 @@ let permissionOk    = false;
 let lastCursorPos   = { x: 0, y: 0 };
 let lastAppName     = '';
 let emaScore        = null;
+let liveAuth        = null;   // { url, anonKey, userId } for direct Supabase writes
+let lastLiveWrite   = 0;
 
 const ALERT_MESSAGES = [
   '少し気が散っているかも。タスクに戻ってみませんか？',
@@ -846,7 +848,7 @@ function startTracking() {
   startAiAnalysis();
   let tickCount = 0;
   trackingTimer = setInterval(async () => {
-    if (!sessionState || !mainWindow) return;
+    if (!sessionState) return;
     tickCount++;
 
     const idleSecs  = powerMonitor.getSystemIdleTime();
@@ -953,8 +955,23 @@ function startTracking() {
       phoneCount: sessionState.phoneEvents.filter(e => e.endedAt).length +
                   (sessionState.activePhoneEvent ? 1 : 0),
     };
-    mainWindow.webContents.send('session:update', update);
+    mainWindow?.webContents.send('session:update', update);
     widgetWindow?.webContents.send('session:update', update);
+
+    // Push live session to Supabase ~1Hz so mobile sees fresh seconds/score even
+    // when the main window is closed or the renderer is on a different screen.
+    if (liveAuth && now - lastLiveWrite >= 1000) {
+      lastLiveWrite = now;
+      writeLiveSession({
+        user_id:     liveAuth.userId,
+        session_id:  sessionState.sessionData.id,
+        score:       liveScore,
+        elapsed,
+        current_app: update.currentApp,
+        phone_count: update.phoneCount,
+        updated_at:  new Date().toISOString(),
+      });
+    }
 
     // Alert when entering red zone or dropping below target (check every 2s)
     if (tickCount % 2 === 0) {
@@ -976,6 +993,34 @@ function stopTracking() {
   destroyAlert();
   prevLiveZone = null;
   targetScore  = null;
+  // Delete the live_sessions row so mobile clears immediately.
+  if (liveAuth) {
+    const auth = liveAuth;
+    liveAuth = null;
+    fetch(`${auth.url}/rest/v1/live_sessions?user_id=eq.${auth.userId}`, {
+      method: 'DELETE',
+      headers: {
+        'apikey':        auth.anonKey,
+        'Authorization': `Bearer ${auth.anonKey}`,
+      },
+    }).catch(() => {});
+  }
+}
+
+async function writeLiveSession(payload) {
+  if (!liveAuth) return;
+  try {
+    await fetch(`${liveAuth.url}/rest/v1/live_sessions`, {
+      method: 'POST',
+      headers: {
+        'apikey':        liveAuth.anonKey,
+        'Authorization': `Bearer ${liveAuth.anonKey}`,
+        'Content-Type':  'application/json',
+        'Prefer':        'resolution=merge-duplicates,return=minimal',
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (_e) {}
 }
 
 // ─── IPC Handlers ─────────────────────────────────────────────────────────────
@@ -987,6 +1032,8 @@ ipcMain.handle('session:start', async (_, data) => {
   postAlertSlowUntil = 0;
   wasIdle            = false;
   targetScore        = data.targetScore ?? null;
+  liveAuth           = data.liveAuth || null;
+  lastLiveWrite      = 0;
   sessionState = {
     sessionData:         { ...data, startedAt: Date.now() },
     windowEvents:        [],

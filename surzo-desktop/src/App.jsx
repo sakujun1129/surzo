@@ -84,7 +84,15 @@ export default function App() {
     const effectiveTarget = payloadTarget !== undefined ? payloadTarget : targetScore;
     // Persist the chosen target as the new default
     if (payloadTarget !== undefined && payloadTarget !== targetScore) handleSetTarget(payloadTarget);
-    const data = { id: genId(), title, category, plannedMinutes, trackPhone, targetScore: effectiveTarget };
+    // Pass Supabase creds so main process can write live_sessions at 1Hz
+    // (works even when the main window is closed mid-session).
+    const uid = getUserId();
+    const liveAuth = (uid && import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY) ? {
+      url:     import.meta.env.VITE_SUPABASE_URL,
+      anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+      userId:  uid,
+    } : null;
+    const data = { id: genId(), title, category, plannedMinutes, trackPhone, targetScore: effectiveTarget, liveAuth };
     await window.electronAPI?.startSession(data);
     setSessionData(data);
     setScreen('active');
