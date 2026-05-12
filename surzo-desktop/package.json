@@ -1,6 +1,6 @@
 {
   "name": "surzo-desktop",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Surzo – PC work tracker",
   "type": "module",
   "main": "electron/main.cjs",

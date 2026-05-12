@@ -354,7 +354,7 @@ export default function App() {
   const banner = <UpdateBanner info={updateInfo} progress={updateProgress} ready={updateReady} onClose={() => setUpdateInfo(null)} />;
 
   if (screen === 'settings')
-    return <>{banner}{drag}<Settings onBack={() => setScreen('dashboard')} theme={theme} onToggleTheme={toggleTheme} /></>;
+    return <>{banner}{drag}<Settings onBack={() => setScreen('dashboard')} theme={theme} onToggleTheme={toggleTheme} onShowOnboarding={() => { localStorage.removeItem('surzo-onboarding-v4'); setShowOnboarding(true); setScreen('dashboard'); }} /></>;
 
   if (screen === 'friends')
     return <>{banner}{drag}<Friends onBack={() => setScreen('dashboard')} /></>;

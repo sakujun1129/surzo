@@ -1,13 +1,17 @@
 import { useState, useEffect } from 'react';
 import { Card } from './ui.jsx';
-import { getSupabase } from '../utils/storage.js';
+import { getSupabase, getUserId, getUserProfile, updateDisplayName } from '../utils/storage.js';
 import QRCode from 'qrcode';
 
 const MOBILE_URL = 'https://surzo-app.vercel.app';
 
-export default function Settings({ onBack, theme, onToggleTheme }) {
+export default function Settings({ onBack, theme, onToggleTheme, onShowOnboarding }) {
   const [userEmail, setUserEmail] = useState(null);
   const [signingOut, setSigningOut] = useState(false);
+  const [displayName, setDisplayName] = useState('');
+  const [originalName, setOriginalName] = useState('');
+  const [savingName, setSavingName] = useState(false);
+  const [nameSaved, setNameSaved] = useState(false);
   const [aiEnabled,    setAiEnabled]    = useState(false);
   const [screenStatus, setScreenStatus] = useState('unknown');
   const [ollamaStatus, setOllamaStatus] = useState('checking');
@@ -31,7 +35,36 @@ export default function Settings({ onBack, theme, onToggleTheme }) {
     window.electronAPI?.checkScreen().then(({ status }) => setScreenStatus(status));
     checkOllama();
     getSupabase()?.auth.getUser().then(({ data }) => setUserEmail(data?.user?.email ?? null));
+    // Try a few times — userId may not be ready immediately after launch
+    const loadProfile = async () => {
+      for (let i = 0; i < 8; i++) {
+        const uid = getUserId();
+        if (uid) {
+          const p = await getUserProfile(uid);
+          const n = p?.display_name || p?.email_handle || '';
+          setDisplayName(n);
+          setOriginalName(n);
+          return;
+        }
+        await new Promise(r => setTimeout(r, 250));
+      }
+    };
+    loadProfile();
   }, []);
+
+  const handleSaveName = async () => {
+    const n = displayName.trim();
+    if (!n || n === originalName) return;
+    setSavingName(true);
+    try {
+      await updateDisplayName(n);
+      setOriginalName(n);
+      setNameSaved(true);
+      setTimeout(() => setNameSaved(false), 2000);
+    } finally {
+      setSavingName(false);
+    }
+  };
 
   const handleLogout = async () => {
     if (!confirm('ログアウトしますか？ローカルのデータは消えません。')) return;
@@ -212,8 +245,27 @@ export default function Settings({ onBack, theme, onToggleTheme }) {
 
         {/* Account */}
         <div className="text-stone-400 dark:text-zinc-500 text-xs uppercase tracking-widest mb-3">Account</div>
-        <Card className="p-4 mb-6">
-          <div className="flex items-center justify-between gap-3">
+        <Card className="p-4 mb-3">
+          <div className="mb-4">
+            <label className="text-[10px] font-bold tracking-widest text-stone-400 dark:text-zinc-500 block mb-2">表示名</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="あなたの名前"
+                maxLength={32}
+                className="flex-1 px-3 py-2.5 rounded-xl bg-stone-100 dark:bg-zinc-800 text-sm font-semibold text-stone-900 dark:text-white outline-none focus:ring-2 focus:ring-lime-300"
+              />
+              <button onClick={handleSaveName}
+                disabled={savingName || !displayName.trim() || displayName.trim() === originalName}
+                className="flex-shrink-0 px-4 py-2.5 rounded-xl text-xs font-bold transition-colors disabled:opacity-40"
+                style={{ background: nameSaved ? 'rgba(212,245,122,0.18)' : '#d4f57a', color: nameSaved ? '#86b03d' : '#06060a' }}>
+                {savingName ? '…' : nameSaved ? '✓ 保存' : '保存'}
+              </button>
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-3 pt-2 border-t border-stone-100 dark:border-zinc-800">
             <div className="min-w-0">
               <div className="text-sm font-semibold truncate">
                 {userEmail || 'ログイン情報を読み込み中…'}
@@ -226,6 +278,17 @@ export default function Settings({ onBack, theme, onToggleTheme }) {
               {signingOut ? '…' : 'ログアウト'}
             </button>
           </div>
+        </Card>
+
+        {/* Help */}
+        <Card className="p-4 mb-6">
+          <button onClick={() => onShowOnboarding?.()} className="w-full flex items-center justify-between px-1 py-1">
+            <div className="text-left">
+              <div className="font-semibold text-sm">操作ガイドを再表示</div>
+              <div className="text-stone-400 dark:text-zinc-500 text-xs mt-0.5">初回起動時のチュートリアルをもう一度見る</div>
+            </div>
+            <span className="text-stone-400 dark:text-zinc-600">›</span>
+          </button>
         </Card>
 
         <button onClick={handleSave}
