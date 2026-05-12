@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react';
 import { Card } from './ui.jsx';
+import { getSupabase } from '../utils/storage.js';
 import QRCode from 'qrcode';
 
 const MOBILE_URL = 'https://surzo-app.vercel.app';
 
 export default function Settings({ onBack, theme, onToggleTheme }) {
+  const [userEmail, setUserEmail] = useState(null);
+  const [signingOut, setSigningOut] = useState(false);
   const [aiEnabled,    setAiEnabled]    = useState(false);
   const [screenStatus, setScreenStatus] = useState('unknown');
   const [ollamaStatus, setOllamaStatus] = useState('checking');
@@ -27,7 +30,14 @@ export default function Settings({ onBack, theme, onToggleTheme }) {
     });
     window.electronAPI?.checkScreen().then(({ status }) => setScreenStatus(status));
     checkOllama();
+    getSupabase()?.auth.getUser().then(({ data }) => setUserEmail(data?.user?.email ?? null));
   }, []);
+
+  const handleLogout = async () => {
+    if (!confirm('ログアウトしますか？ローカルのデータは消えません。')) return;
+    setSigningOut(true);
+    try { await getSupabase()?.auth.signOut(); } catch (_e) {}
+  };
 
   const checkOllama = async () => {
     setOllamaStatus('checking');
@@ -198,6 +208,24 @@ export default function Settings({ onBack, theme, onToggleTheme }) {
               </p>
             </div>
           )}
+        </Card>
+
+        {/* Account */}
+        <div className="text-stone-400 dark:text-zinc-500 text-xs uppercase tracking-widest mb-3">Account</div>
+        <Card className="p-4 mb-6">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold truncate">
+                {userEmail || 'ログイン情報を読み込み中…'}
+              </div>
+              <div className="text-stone-400 dark:text-zinc-500 text-xs mt-0.5">Supabase アカウント</div>
+            </div>
+            <button onClick={handleLogout} disabled={signingOut || !userEmail}
+              className="flex-shrink-0 px-4 py-2 rounded-xl text-xs font-bold transition-colors disabled:opacity-50"
+              style={{ background: 'rgba(244,63,94,0.12)', color: '#f43f5e' }}>
+              {signingOut ? '…' : 'ログアウト'}
+            </button>
+          </div>
         </Card>
 
         <button onClick={handleSave}

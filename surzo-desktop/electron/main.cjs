@@ -1332,9 +1332,9 @@ app.whenReady().then(() => {
   try {
     app.setLoginItemSettings({ openAtLogin: true, openAsHidden: false });
   } catch (_e) {}
-  // Dev-mode dock icon (in packaged builds the bundle icon is used)
+  // Force dock icon to latest build/icon.png (also overrides macOS icon cache in prod)
   try {
-    if (isDev && app.dock) {
+    if (app.dock) {
       const iconPath = path.join(__dirname, '..', 'build', 'icon.png');
       if (fs.existsSync(iconPath)) app.dock.setIcon(iconPath);
     }
