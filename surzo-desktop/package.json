@@ -1,6 +1,6 @@
 {
   "name": "surzo-desktop",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Surzo – PC work tracker",
   "type": "module",
   "main": "electron/main.cjs",
@@ -32,7 +32,10 @@
     "productName": "Surzo",
     "mac": {
       "category": "public.app-category.productivity",
-      "target": "dmg",
+      "target": [
+        { "target": "zip", "arch": "arm64" },
+        { "target": "dmg", "arch": "arm64" }
+      ],
       "icon": "build/icon.icns"
     },
     "files": [

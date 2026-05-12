@@ -1138,15 +1138,29 @@ ipcMain.on('theme:set', (_, theme) => {
 
 // ─── Auto-updater (self-rolled, no Apple signing) ────────────────────────────
 
-let downloadedUpdatePath = null;
+let downloadedUpdatePath    = null;
 let downloadedUpdateVersion = null;
-let downloadingUpdate = false;
+let downloadedUpdateKind    = null; // 'zip' | 'dmg'
+let downloadingUpdate       = false;
 
-function pickDmgAsset(assets) {
-  const arch = process.arch; // 'arm64' or 'x64'
-  const archDmg = assets.find(a => a.name && a.name.toLowerCase().endsWith(`-${arch}.dmg`));
-  if (archDmg) return archDmg;
-  return assets.find(a => a.name && a.name.toLowerCase().endsWith('.dmg'));
+function pickUpdateAsset(assets) {
+  const arch = process.arch;
+  const usable = (assets || []).filter(a => {
+    const n = (a.name || '').toLowerCase();
+    if (!n) return false;
+    if (n.endsWith('.blockmap') || n.endsWith('.yml')) return false;
+    return n.endsWith('.zip') || n.endsWith('.dmg');
+  });
+  // Prefer ZIP — smaller, faster to download AND no hdiutil dance
+  const archZip = usable.find(a => a.name.toLowerCase().includes(arch) && a.name.toLowerCase().endsWith('.zip'));
+  if (archZip) return { ...archZip, kind: 'zip' };
+  const anyZip = usable.find(a => a.name.toLowerCase().endsWith('.zip'));
+  if (anyZip) return { ...anyZip, kind: 'zip' };
+  const archDmg = usable.find(a => a.name.toLowerCase().endsWith(`-${arch}.dmg`));
+  if (archDmg) return { ...archDmg, kind: 'dmg' };
+  const anyDmg = usable.find(a => a.name.toLowerCase().endsWith('.dmg'));
+  if (anyDmg) return { ...anyDmg, kind: 'dmg' };
+  return null;
 }
 
 function downloadToFile(url, destPath, onProgress, redirectsLeft = 5) {
@@ -1194,7 +1208,7 @@ async function checkForUpdates() {
     const current = app.getVersion();
     if (latestTag === current) return;
 
-    const asset = pickDmgAsset(data.assets || []);
+    const asset = pickUpdateAsset(data.assets || []);
     const fallbackUrl = data.html_url || `https://github.com/${repoSlug}/releases/latest`;
 
     mainWindow?.webContents.send('update:available', {
@@ -1207,14 +1221,16 @@ async function checkForUpdates() {
     if (!asset) return;
 
     downloadingUpdate = true;
-    const dest = path.join(app.getPath('temp'), `surzo-update-${latestTag}.dmg`);
+    const ext  = asset.kind === 'zip' ? 'zip' : 'dmg';
+    const dest = path.join(app.getPath('temp'), `surzo-update-${latestTag}.${ext}`);
     try { fs.unlinkSync(dest); } catch {}
     await downloadToFile(asset.browser_download_url, dest, (p) => {
       mainWindow?.webContents.send('update:progress', { percent: Math.round(p * 100) });
     });
-    downloadedUpdatePath = dest;
+    downloadedUpdatePath    = dest;
     downloadedUpdateVersion = latestTag;
-    downloadingUpdate = false;
+    downloadedUpdateKind    = asset.kind;
+    downloadingUpdate       = false;
     mainWindow?.webContents.send('update:downloaded', { version: latestTag });
   } catch (_e) {
     downloadingUpdate = false;
@@ -1230,11 +1246,24 @@ function applyDownloadedUpdate() {
   const appBundle = path.dirname(path.dirname(path.dirname(exePath)));
   if (!appBundle.endsWith('.app')) return false;
 
-  const stamp = Date.now();
-  const scriptPath = path.join(app.getPath('temp'), `surzo-apply-update-${stamp}.sh`);
-  const logPath    = path.join(app.getPath('temp'), 'surzo-update.log');
-  const pid = process.pid;
-  const dmg = downloadedUpdatePath;
+  const stamp        = Date.now();
+  const scriptPath   = path.join(app.getPath('temp'), `surzo-apply-update-${stamp}.sh`);
+  const logPath      = path.join(app.getPath('temp'), 'surzo-update.log');
+  const pid          = process.pid;
+  const download     = downloadedUpdatePath;
+  const isZip        = downloadedUpdateKind === 'zip';
+
+  const acquireSrc = isZip
+    ? `EXTRACT=$(mktemp -d -t surzo-upd-extract)
+echo "[$(date)] extracting ZIP ${download} into $EXTRACT"
+unzip -q "${download}" -d "$EXTRACT" || { echo "unzip failed"; exit 1; }
+SRC=$(find "$EXTRACT" -maxdepth 3 -name "*.app" -type d | head -n 1)
+CLEANUP() { rm -rf "$EXTRACT"; }`
+    : `MOUNT=$(mktemp -d -t surzo-upd-mount)
+echo "[$(date)] mounting DMG ${download} at $MOUNT"
+hdiutil attach "${download}" -nobrowse -noautoopen -mountpoint "$MOUNT" >/dev/null || { echo "mount failed"; exit 1; }
+SRC=$(find "$MOUNT" -maxdepth 2 -name "*.app" -type d | head -n 1)
+CLEANUP() { hdiutil detach "$MOUNT" -force >/dev/null 2>&1 || true; rm -rf "$MOUNT"; }`;
 
   const script = `#!/bin/bash
 exec > "${logPath}" 2>&1
@@ -1245,34 +1274,30 @@ for i in $(seq 1 100); do
 done
 sleep 0.5
 
-MOUNT=$(mktemp -d -t surzo-upd)
-echo "[$(date)] mounting ${dmg} at $MOUNT"
-hdiutil attach "${dmg}" -nobrowse -noautoopen -mountpoint "$MOUNT" >/dev/null || { echo "mount failed"; exit 1; }
+${acquireSrc}
 
-SRC=$(find "$MOUNT" -maxdepth 2 -name "*.app" -type d | head -n 1)
 if [ -z "$SRC" ]; then
-  echo "no .app found in DMG"
-  hdiutil detach "$MOUNT" -force >/dev/null 2>&1 || true
+  echo "no .app found in archive"
+  CLEANUP
   exit 1
 fi
 
 BACKUP="${appBundle}.old-${stamp}"
 echo "[$(date)] replacing ${appBundle} (backup: $BACKUP)"
-mv "${appBundle}" "$BACKUP" || { echo "backup move failed"; hdiutil detach "$MOUNT" -force >/dev/null 2>&1; exit 1; }
+mv "${appBundle}" "$BACKUP" || { echo "backup move failed"; CLEANUP; exit 1; }
 if cp -R "$SRC" "${appBundle}"; then
   rm -rf "$BACKUP"
 else
   echo "copy failed — rolling back"
   rm -rf "${appBundle}"
   mv "$BACKUP" "${appBundle}"
-  hdiutil detach "$MOUNT" -force >/dev/null 2>&1
+  CLEANUP
   exit 1
 fi
 xattr -dr com.apple.quarantine "${appBundle}" 2>/dev/null || true
 
-hdiutil detach "$MOUNT" -force >/dev/null 2>&1 || true
-rm -rf "$MOUNT"
-rm -f "${dmg}"
+CLEANUP
+rm -f "${download}"
 
 echo "[$(date)] launching ${appBundle}"
 open "${appBundle}"
