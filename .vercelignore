@@ -1,6 +1,7 @@
 node_modules
 surzo-mobile
-surzo-app
+surzo-desktop
+surzo-landing
 dist
 web-build
 .expo
