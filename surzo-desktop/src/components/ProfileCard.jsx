@@ -14,6 +14,7 @@ export default function ProfileCard({ userId, onClose }) {
   const [status, setStatus]   = useState('none'); // none, sent, received, accepted, self
   const [busy, setBusy]       = useState(false);
   const [loading, setLoading] = useState(true);
+  const [menuOpen, setMenuOpen] = useState(false);
   const myId = getUserId();
 
   useEffect(() => {
@@ -81,10 +82,13 @@ export default function ProfileCard({ userId, onClose }) {
           <>
             {/* Header */}
             <div className="flex items-center gap-4 mb-5">
-              <div className="w-16 h-16 rounded-2xl flex items-center justify-center flex-shrink-0 text-2xl font-black"
+              <button onClick={() => setMenuOpen(true)}
+                className="w-16 h-16 rounded-2xl flex items-center justify-center flex-shrink-0 text-2xl font-black overflow-hidden active:scale-95 transition-transform"
                 style={{ background: '#d4f57a', color: '#000' }}>
-                {initials}
-              </div>
+                {profile.avatar_url ? (
+                  <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
+                ) : initials}
+              </button>
               <div className="flex-1 min-w-0">
                 <div className="text-xl font-black tracking-tight truncate">{name}</div>
                 <div className="text-zinc-500 dark:text-zinc-600 text-xs mt-0.5">
@@ -167,12 +171,44 @@ export default function ProfileCard({ userId, onClose }) {
                 ✓ リクエストを承認
               </button>
             ) : (
-              <button onClick={handleRemove} disabled={busy}
-                className="w-full bg-stone-100 dark:bg-zinc-900 text-red-500 font-bold py-3.5 rounded-2xl">
-                フレンドから削除
+              <button onClick={onClose}
+                className="w-full bg-stone-100 dark:bg-zinc-900 text-stone-500 dark:text-zinc-400 font-bold py-3.5 rounded-2xl">
+                閉じる
               </button>
             )}
           </>
+        )}
+
+        {menuOpen && (
+          <div className="absolute inset-0 z-10 flex items-end justify-center rounded-t-3xl"
+               style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)' }}
+               onClick={() => setMenuOpen(false)}>
+            <div onClick={(e) => e.stopPropagation()}
+                 className="w-full bg-white dark:bg-zinc-950 rounded-2xl m-3 p-2 fadein border border-stone-200 dark:border-zinc-800">
+              <div className="text-center text-stone-500 dark:text-zinc-500 text-xs py-2">{name} · オプション</div>
+              {status === 'accepted' ? (
+                <button onClick={async () => {
+                  setMenuOpen(false);
+                  if (confirm(`${name} さんをフレンドから削除しますか？`)) await handleRemove();
+                }} className="w-full py-3 rounded-xl text-red-500 font-bold text-sm hover:bg-stone-100 dark:hover:bg-zinc-900">
+                  フレンドから削除
+                </button>
+              ) : status === 'sent' ? (
+                <button onClick={async () => {
+                  setMenuOpen(false);
+                  if (confirm(`${name} さんへのリクエストを取り消しますか？`)) await handleRemove();
+                }} className="w-full py-3 rounded-xl text-orange-500 font-bold text-sm hover:bg-stone-100 dark:hover:bg-zinc-900">
+                  リクエストを取り消す
+                </button>
+              ) : (
+                <div className="text-center text-stone-400 dark:text-zinc-600 text-xs py-3">操作はありません</div>
+              )}
+              <button onClick={() => setMenuOpen(false)}
+                className="w-full mt-1 py-3 text-stone-500 dark:text-zinc-500 font-semibold text-sm">
+                キャンセル
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>

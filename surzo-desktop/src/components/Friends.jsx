@@ -174,50 +174,78 @@ function FriendsSheet({ friends, requests, reload, onClose, onSelectUser }) {
   );
 }
 
-function FeedItem({ user, session, created_at, onTapUser }) {
-  const c = scoreColor(session.averageWorkScore);
-  const pts = calcTotal(session);
-  const name = user.display_name || user.email_handle || '?';
-  const hasPhoto = session.photoUri?.startsWith('https://');
-  return (
-    <div className="sz-card overflow-hidden mb-3" style={{ borderRadius: 18 }}>
-      <button onClick={() => onTapUser(user.id)} className="w-full flex items-center gap-3 px-4 pt-3.5 pb-3 text-left">
-        <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 font-black overflow-hidden"
-          style={{ background: '#d4f57a', color: '#000', fontSize: 12 }}>
-          {user.avatar_url ? <img src={user.avatar_url} alt="" className="w-full h-full object-cover" /> : name.slice(0, 2).toUpperCase()}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="font-bold text-sm truncate">{name}</div>
-          <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-            {user.flag_emoji} · {timeAgo(created_at)}
-          </div>
-        </div>
-        <div className="font-black tabular-nums" style={{ fontSize: 26, color: c, letterSpacing: '-0.04em' }}>
-          {session.averageWorkScore}
-        </div>
-      </button>
+function getZone(s) {
+  if (s >= 85) return 'DEEP FOCUS';
+  if (s >= 70) return 'ON TRACK';
+  if (s >= 55) return 'FOCUSED';
+  if (s >= 38) return 'DRIFTING';
+  if (s >= 20) return 'OFF TASK';
+  return 'DISTRACTED';
+}
 
-      {hasPhoto ? (
-        <div className="relative" style={{ aspectRatio: '4/5' }}>
-          <img src={session.photoUri} className="absolute inset-0 w-full h-full object-cover" alt="" />
-          <div className="absolute inset-0" style={{ background: 'linear-gradient(to bottom, transparent 55%, rgba(0,0,0,0.82) 100%)' }} />
-          <div className="absolute bottom-0 left-0 right-0 px-4 pb-3.5">
-            <div className="font-semibold text-sm text-white truncate">{session.title}</div>
-            <div className="text-[11px] mt-0.5" style={{ color: c + 'cc' }}>
-              {fmtScore(pts)} pts · {fmtMin(session.durationMinutes)}
-              {session.phoneDistractionCount > 0 && <span style={{ color: '#fb923c', marginLeft: 6 }}>· 📱×{session.phoneDistractionCount}</span>}
+// Share-card style feed card — photos only (BeReal feel)
+function FeedItem({ user, session, created_at, onTapUser }) {
+  const c    = scoreColor(session.averageWorkScore);
+  const pts  = calcTotal(session);
+  const zone = getZone(session.averageWorkScore);
+  const name = user.display_name || user.email_handle || '?';
+  const rgba = (rgb, a) => rgb.replace('rgb(', 'rgba(').replace(')', `,${a})`);
+  const dateStr = new Date(session.endedAt || session.startedAt || created_at)
+                    .toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' });
+
+  return (
+    <div className="relative rounded-3xl overflow-hidden shadow-2xl mb-4"
+         style={{ aspectRatio: '4/5', background: '#08080b' }}>
+      <img src={session.photoUri} className="absolute inset-0 w-full h-full object-cover" alt="" />
+      <div className="absolute inset-0" style={{
+        background: 'linear-gradient(180deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.05) 28%, rgba(0,0,0,0.30) 58%, rgba(0,0,0,0.92) 100%)',
+      }} />
+
+      {/* Top: avatar (tap → profile) + name + date */}
+      <div className="absolute top-0 left-0 right-0 flex items-start justify-between px-5 pt-5">
+        <button onClick={() => onTapUser(user.id)}
+                className="flex items-center gap-2.5 min-w-0 max-w-[68%] active:scale-95 transition-transform">
+          <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 font-black overflow-hidden"
+               style={{ background: '#d4f57a', color: '#000', fontSize: 13 }}>
+            {user.avatar_url
+              ? <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
+              : name.slice(0,2).toUpperCase()}
+          </div>
+          <div className="min-w-0 text-left">
+            <div className="text-white font-bold text-sm truncate">{name}</div>
+            <div className="text-white/55 text-[10px] mt-0.5 truncate">
+              {user.flag_emoji || '🌐'} · {timeAgo(created_at)}
+            </div>
+          </div>
+        </button>
+        <span className="text-white/55 text-[10px] font-semibold mt-1 tabular-nums truncate ml-2">{dateStr}</span>
+      </div>
+
+      {/* Bottom: title + huge score + zone/pts */}
+      <div className="absolute bottom-0 left-0 right-0 px-5 pb-5">
+        <div className="text-white font-black text-base leading-tight mb-0.5 truncate" style={{ letterSpacing: '-0.01em' }}>
+          {session.title}
+        </div>
+        <div className="text-white/55 text-[11px] tabular-nums mb-2">
+          {session.category} · {fmtMin(session.durationMinutes)}
+          {session.phoneDistractionCount > 0 && <span className="text-orange-400 ml-1.5">· 📱×{session.phoneDistractionCount}</span>}
+        </div>
+        <div className="flex items-end gap-3">
+          <div className="font-black tabular-nums leading-[0.82]"
+               style={{ fontSize: 'clamp(72px, 18vw, 110px)', color: c, letterSpacing: '-0.06em',
+                        textShadow: '0 4px 24px rgba(0,0,0,0.55)' }}>
+            {session.averageWorkScore}
+          </div>
+          <div className="pb-1.5 min-w-0">
+            <div className="font-extrabold tracking-[2px] text-[9px] mb-1" style={{ color: c }}>{zone}</div>
+            <div className="text-white/45 text-[8px] font-bold tracking-widest">WORK SCORE</div>
+            <div className="flex items-baseline gap-1 mt-1">
+              <span className="font-black text-white tabular-nums text-base">{fmtScore(pts)}</span>
+              <span className="text-white/45 text-[8px] font-bold tracking-widest">PTS</span>
             </div>
           </div>
         </div>
-      ) : (
-        <div className="px-4 pb-4">
-          <div className="font-semibold text-sm truncate" style={{ color: 'var(--text)' }}>{session.title}</div>
-          <div className="text-xs mt-0.5" style={{ color: 'var(--text-sub)' }}>
-            {fmtScore(pts)} pts · {fmtMin(session.durationMinutes)}
-            {session.phoneDistractionCount > 0 && <span style={{ color: '#fb923c', marginLeft: 6 }}>· 📱×{session.phoneDistractionCount}</span>}
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -233,7 +261,11 @@ export default function Friends({ onBack }) {
   const reload = () => {
     setLoading(true);
     Promise.all([getFriendsFeed(30), getFriendsList(), getPendingRequests()])
-      .then(([f, fr, r]) => { setFeed(f); setFriends(fr); setRequests(r); })
+      .then(([f, fr, r]) => {
+        // Photos-only feed (BeReal feel)
+        const photoFeed = f.filter(x => x.session?.photoUri?.startsWith('https://'));
+        setFeed(photoFeed); setFriends(fr); setRequests(r);
+      })
       .finally(() => setLoading(false));
   };
   useEffect(() => { reload(); }, []);
@@ -270,7 +302,7 @@ export default function Friends({ onBack }) {
         ) : feed.length === 0 ? (
           <div className="text-center py-12">
             <p className="text-sm font-semibold" style={{ color: 'var(--text-sub)' }}>フィードはまだ空です</p>
-            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>右上のアイコンからフレンドを検索・追加できます</p>
+            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>写真付きのセッションだけがここに流れます</p>
           </div>
         ) : (
           <div>

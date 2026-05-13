@@ -100,3 +100,10 @@ CREATE TABLE IF NOT EXISTS session_reactions (
 ALTER TABLE session_reactions DISABLE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS session_reactions_session_idx ON session_reactions (session_id);
 CREATE INDEX IF NOT EXISTS session_reactions_owner_idx   ON session_reactions (owner_id);
+
+-- Daily ranking columns (idempotent — safe to run multiple times)
+ALTER TABLE user_profiles
+  ADD COLUMN IF NOT EXISTS daily_pts      INT  DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS daily_avg      INT  DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS daily_sessions INT  DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS daily_date     DATE;

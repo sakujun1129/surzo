@@ -9,13 +9,13 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <meta name="surzo-version" content="2026-05-13-7" />
+  <meta name="surzo-version" content="2026-05-13-8" />
   <title>Surzo</title>
   <script>
     // Force-update mechanism: poll the live HTML every 60s, compare version meta.
     // If changed, reload the page so the user always has the latest version.
     (function() {
-      const CURRENT_VERSION = '2026-05-13-7';
+      const CURRENT_VERSION = '2026-05-13-8';
       let checking = false;
       async function checkVersion() {
         if (checking) return;
@@ -389,7 +389,9 @@
         const today = sessions.filter(x => x.startedAt && isToday(x.startedAt));
         const dailyPts = today.reduce((s, x) => s + calcTotal(x), 0);
         const dailyAvg = today.length ? Math.round(today.reduce((s, x) => s + (x.averageWorkScore || 0), 0) / today.length) : 0;
-        const todayISO = new Date(now).toISOString().slice(0, 10);
+        // Use LOCAL date so the JST/PST/etc cutover lines up with the user's perception of "today"
+        const d = new Date(now);
+        const todayISO = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
         const last = sessions[0];
         // Base columns (always exist)
         await sb.from('user_profiles').update({
@@ -410,7 +412,11 @@
       if (scope === 'daily') col = metric === 'avg' ? 'daily_avg' : 'daily_pts';
       else col = metric === 'avg' ? 'avg_score' : 'total_pts';
       let q = sb.from('user_profiles').select('*').gt(col, 0).order(col, { ascending: false }).limit(limit);
-      if (scope === 'daily') q = q.eq('daily_date', new Date().toISOString().slice(0, 10));
+      if (scope === 'daily') {
+        const d = new Date();
+        const today = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        q = q.eq('daily_date', today);
+      }
       const { data } = await q;
       return data ?? [];
     }
@@ -1724,6 +1730,7 @@
       const [busy, setBusy] = useState(false);
       const [loading, setLoading] = useState(true);
       const [myId, setMyId] = useState(null);
+      const [menuOpen, setMenuOpen] = useState(false);
 
       useEffect(() => {
         let mounted = true;
@@ -1793,10 +1800,8 @@
             ) : (
               <>
                 <div className="flex items-center gap-4 mb-5">
-                  <button onClick={async () => {
-                    if (status !== 'accepted') return;
-                    if (confirm(`${name} さんをフレンドから削除しますか？`)) await handleRemove();
-                  }} className="w-16 h-16 rounded-2xl flex items-center justify-center flex-shrink-0 text-2xl font-black overflow-hidden active:scale-95 transition-transform"
+                  <button onClick={() => setMenuOpen(true)}
+                    className="w-16 h-16 rounded-2xl flex items-center justify-center flex-shrink-0 text-2xl font-black overflow-hidden active:scale-95 transition-transform"
                     style={{ background: '#d4f57a', color: '#000' }}>
                     {profile.avatar_url ? (
                       <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
@@ -1806,7 +1811,6 @@
                     <div className="text-xl font-black tracking-tight truncate">{name}</div>
                     <div className="text-zinc-600 text-xs mt-0.5">
                       {profile.flag_emoji || '🌐'} {profile.country || '—'}
-                      {status === 'accepted' && <span className="ml-1.5 text-zinc-700">· アイコンを押して削除</span>}
                     </div>
                   </div>
                 </div>
@@ -1885,6 +1889,40 @@
               </>
             )}
           </div>
+
+          {menuOpen && (
+            <div className="fixed inset-0 z-[60] flex items-end justify-center"
+                 style={{ background: 'rgba(0,0,0,0.6)' }}
+                 onClick={() => setMenuOpen(false)}>
+              <div onClick={(e) => e.stopPropagation()}
+                   className="w-full max-w-md bg-zinc-950 rounded-t-3xl px-4 pt-2 fadein"
+                   style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0) + 16px)' }}>
+                <div className="w-12 h-1 bg-zinc-800 rounded-full mx-auto my-3" />
+                <div className="text-center text-zinc-500 text-xs mb-2">{name} · オプション</div>
+                {status === 'accepted' ? (
+                  <button onClick={async () => {
+                    setMenuOpen(false);
+                    if (confirm(`${name} さんをフレンドから削除しますか？`)) await handleRemove();
+                  }} className="w-full py-3.5 rounded-2xl text-red-400 font-bold text-sm active:scale-[.98] transition-transform">
+                    フレンドから削除
+                  </button>
+                ) : status === 'sent' ? (
+                  <button onClick={async () => {
+                    setMenuOpen(false);
+                    if (confirm(`${name} さんへのリクエストを取り消しますか？`)) await handleRemove();
+                  }} className="w-full py-3.5 rounded-2xl text-orange-400 font-bold text-sm active:scale-[.98] transition-transform">
+                    リクエストを取り消す
+                  </button>
+                ) : (
+                  <div className="text-center text-zinc-600 text-xs py-3">操作はありません</div>
+                )}
+                <button onClick={() => setMenuOpen(false)}
+                  className="w-full mt-1 py-3.5 text-zinc-500 font-semibold text-sm">
+                  キャンセル
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       );
     }
@@ -2310,8 +2348,10 @@
         setLoading(true);
         Promise.all([getFriendsFeed(30), getFriendsList(), getPendingRequests()])
           .then(async ([f, fr, r]) => {
-            setFeed(f); setFriends(fr); setRequests(r);
-            const sids = f.map(x => x.session?.id).filter(Boolean);
+            // Photos-only feed (BeReal-style — sessions without an image are skipped)
+            const photoFeed = f.filter(x => x.session?.photoUri?.startsWith('https://'));
+            setFeed(photoFeed); setFriends(fr); setRequests(r);
+            const sids = photoFeed.map(x => x.session?.id).filter(Boolean);
             const rx = await getReactionsForSessions(sids);
             setReactions(rx);
           })
