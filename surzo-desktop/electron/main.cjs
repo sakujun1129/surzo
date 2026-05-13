@@ -657,6 +657,8 @@ let lastAppName     = '';
 let emaScore        = null;
 let liveAuth        = null;   // { url, anonKey, userId } for direct Supabase writes
 let lastLiveWrite   = 0;
+let nowPlayingPollTimer = null;
+let lastNowPlayingSig   = null;
 
 const ALERT_MESSAGES = [
   '少し気が散っているかも。タスクに戻ってみませんか？',
@@ -685,9 +687,12 @@ function repositionWidget() {
     return;
   }
   const { workArea } = screen.getPrimaryDisplay();
+  // Window is 280×200. Pill is anchored 70px from the window top via CSS,
+  // so pill_top_screen_y = window_y + 70. To keep the pill ~44px above the
+  // dock, window_y = workArea_bottom - 44 - 70 = workArea_bottom - 114.
   widgetWindow.setPosition(
-    Math.floor((workArea.width - 220) / 2),
-    workArea.y + workArea.height - 44
+    Math.floor((workArea.width - 280) / 2),
+    workArea.y + workArea.height - 114
   );
 }
 
@@ -738,8 +743,8 @@ function createWidget() {
   if (widgetWindow) return;
 
   widgetWindow = new BrowserWindow({
-    width: 220,
-    height: 130,
+    width: 280,
+    height: 200,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -846,6 +851,7 @@ function startTracking() {
   if (trackingTimer) return;
   createWidget();
   startAiAnalysis();
+  startNowPlayingPoller();
   let tickCount = 0;
   trackingTimer = setInterval(async () => {
     if (!sessionState) return;
@@ -989,6 +995,7 @@ function startTracking() {
 function stopTracking() {
   if (trackingTimer) { clearInterval(trackingTimer); trackingTimer = null; }
   stopAiAnalysis();
+  stopNowPlayingPoller();
   destroyWidget();
   destroyAlert();
   prevLiveZone = null;
@@ -1006,6 +1013,94 @@ function stopTracking() {
     }).catch(() => {});
   }
 }
+
+// ─── Now Playing (Music / Spotify) ────────────────────────────────────────────
+
+const NOW_PLAYING_SCRIPTS = {
+  Music: `
+tell application "Music"
+  if it is running then
+    try
+      set ps to (player state as string)
+      if ps is "playing" or ps is "paused" then
+        set t to current track
+        return ps & "\\n" & (name of t as string) & "\\n" & (artist of t as string) & "\\n" & (album of t as string)
+      end if
+    end try
+  end if
+end tell`,
+  Spotify: `
+tell application "Spotify"
+  if it is running then
+    try
+      set ps to (player state as string)
+      if ps is "playing" or ps is "paused" then
+        return ps & "\\n" & (name of current track as string) & "\\n" & (artist of current track as string) & "\\n" & (album of current track as string)
+      end if
+    end try
+  end if
+end tell`,
+};
+
+function osa(script, timeout = 1200) {
+  return new Promise((resolve, reject) => {
+    execFile('osascript', ['-e', script], { timeout }, (err, stdout) => {
+      if (err) reject(err);
+      else resolve((stdout || '').trim());
+    });
+  });
+}
+
+async function detectNowPlaying() {
+  for (const [app, script] of Object.entries(NOW_PLAYING_SCRIPTS)) {
+    try {
+      const out = await osa(script);
+      if (out && out.includes('\n')) {
+        const [state, title, artist, album] = out.split('\n');
+        if (state === 'playing' || state === 'paused') {
+          return { app, state, title: title || '', artist: artist || '', album: album || '' };
+        }
+      }
+    } catch (_e) {}
+  }
+  return null;
+}
+
+async function pollNowPlaying() {
+  const np = await detectNowPlaying();
+  const sig = np ? `${np.app}|${np.state}|${np.title}|${np.artist}` : null;
+  if (sig === lastNowPlayingSig) return;
+  lastNowPlayingSig = sig;
+  widgetWindow?.webContents.send('nowPlaying:update', np);
+}
+
+function startNowPlayingPoller() {
+  if (nowPlayingPollTimer) return;
+  pollNowPlaying();
+  nowPlayingPollTimer = setInterval(pollNowPlaying, 4000);
+}
+
+function stopNowPlayingPoller() {
+  if (nowPlayingPollTimer) { clearInterval(nowPlayingPollTimer); nowPlayingPollTimer = null; }
+  lastNowPlayingSig = null;
+}
+
+ipcMain.handle('nowplaying:command', async (_, app, cmd) => {
+  if (!['Music', 'Spotify'].includes(app)) return;
+  const map = { playpause: 'playpause', next: 'next track', previous: 'previous track' };
+  const verb = map[cmd];
+  if (!verb) return;
+  try { await osa(`tell application "${app}" to ${verb}`); } catch (_e) {}
+  // Refresh after a short delay (state may change)
+  setTimeout(pollNowPlaying, 350);
+});
+
+ipcMain.handle('nowplaying:open', async (_, app) => {
+  if (!['Music', 'Spotify'].includes(app)) return;
+  try {
+    await new Promise((resolve) => execFile('open', ['-a', app], () => resolve()));
+  } catch (_e) {}
+});
 
 async function writeLiveSession(payload) {
   if (!liveAuth) return;

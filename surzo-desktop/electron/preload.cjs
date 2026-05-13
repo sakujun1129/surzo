@@ -45,6 +45,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   widgetTap:        () => ipcRenderer.send('widget:tap'),
   widgetDragStart:  () => ipcRenderer.send('widget:drag-start'),
   widgetDragEnd:    () => ipcRenderer.send('widget:drag-end'),
+  onNowPlaying:     (cb) => {
+    const l = (_, np) => cb(np);
+    ipcRenderer.on('nowPlaying:update', l);
+    return () => ipcRenderer.removeListener('nowPlaying:update', l);
+  },
+  mediaCommand:     (app, cmd) => ipcRenderer.invoke('nowplaying:command', app, cmd),
+  openMediaApp:     (app)      => ipcRenderer.invoke('nowplaying:open', app),
 
   // Alert (widget-integrated)
   onAlertMobile: (cb) => {

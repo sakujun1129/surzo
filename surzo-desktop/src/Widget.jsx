@@ -55,6 +55,8 @@ export default function Widget() {
   const [prevScore, setPrev]    = useState(null);
   const [alertMsg, setAlertMsg] = useState(null);
   const [dragging, setDragging] = useState(false);
+  const [nowPlaying, setNowPlaying] = useState(null);
+  const [hovering,   setHovering]   = useState(false);
   const histRef          = useRef([]);
   const timerRef         = useRef(null);
   const pressStartRef    = useRef(0);
@@ -91,7 +93,8 @@ export default function Widget() {
       setAlertMsg(null);
       clearTimeout(timerRef.current);
     });
-    return () => { u1?.(); u2?.(); u3?.(); };
+    const u4 = window.electronAPI.onNowPlaying?.((np) => setNowPlaying(np));
+    return () => { u1?.(); u2?.(); u3?.(); u4?.(); };
   }, []);
 
   const dismiss = () => { clearTimeout(timerRef.current); setAlertMsg(null); };
@@ -172,20 +175,51 @@ export default function Widget() {
     return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(' ') : '';
 
+  const musicVisible = hovering && nowPlaying;
+
+  const handleHoverEnter = () => {
+    setHovering(true);
+    window.electronAPI?.setWidgetMouse?.(false);
+  };
+  const handleHoverLeave = () => {
+    setHovering(false);
+    if (!draggingRef.current && !longPressedRef.current && pressStartRef.current) {
+      if (holdTimerRef.current) { clearTimeout(holdTimerRef.current); holdTimerRef.current = null; }
+      pressStartRef.current = 0;
+    }
+    window.electronAPI?.setWidgetMouse?.(true);
+  };
+
   return (
-    <div className="wr">
+    <div className="wr" onMouseEnter={handleHoverEnter} onMouseLeave={handleHoverLeave}>
+      {musicVisible && (
+        <div className="wnp">
+          <div className="wnp-info" onClick={() => window.electronAPI?.openMediaApp?.(nowPlaying.app)}>
+            <div className="wnp-title" title={nowPlaying.title}>{nowPlaying.title || '—'}</div>
+            <div className="wnp-artist" title={`${nowPlaying.artist} · ${nowPlaying.app}`}>
+              {nowPlaying.artist || nowPlaying.album} <span className="wnp-src">· {nowPlaying.app}</span>
+            </div>
+          </div>
+          <div className="wnp-controls">
+            <button className="wnp-btn" onClick={() => window.electronAPI?.mediaCommand?.(nowPlaying.app, 'previous')} aria-label="previous">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zM9.5 12L20 6v12z"/></svg>
+            </button>
+            <button className="wnp-btn wnp-btn-play" onClick={() => window.electronAPI?.mediaCommand?.(nowPlaying.app, 'playpause')} aria-label="play/pause">
+              {nowPlaying.state === 'playing' ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1.5"/><rect x="14" y="5" width="4" height="14" rx="1.5"/></svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              )}
+            </button>
+            <button className="wnp-btn" onClick={() => window.electronAPI?.mediaCommand?.(nowPlaying.app, 'next')} aria-label="next">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM4 6l10.5 6L4 18z"/></svg>
+            </button>
+          </div>
+        </div>
+      )}
       <div
         className={`wp${alertMsg ? ' wp-open' : ''}${dragging ? ' wp-dragging' : ''}`}
         onMouseDown={handleMouseDown}
-        onMouseEnter={() => window.electronAPI?.setWidgetMouse?.(false)}
-        onMouseLeave={() => {
-          // If user mouses out before drag triggers, cancel the pending press
-          if (!draggingRef.current && !longPressedRef.current && pressStartRef.current) {
-            if (holdTimerRef.current) { clearTimeout(holdTimerRef.current); holdTimerRef.current = null; }
-            pressStartRef.current = 0;
-          }
-          window.electronAPI?.setWidgetMouse?.(true);
-        }}
       >
         <div className="wrow">
           {phoneActive
