@@ -86,3 +86,17 @@ CREATE TABLE IF NOT EXISTS session_photos (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE session_photos DISABLE ROW LEVEL SECURITY;
+
+-- session_reactions: BeReal風絵文字スタンプ（フレンドフィード用）
+CREATE TABLE IF NOT EXISTS session_reactions (
+  id          UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
+  session_id  TEXT        NOT NULL,        -- references sessions.id (jsonb-stored)
+  owner_id    UUID        NOT NULL,        -- session 所有者
+  reactor_id  UUID        NOT NULL,        -- スタンプ送った人
+  emoji       TEXT        NOT NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(session_id, reactor_id, emoji)
+);
+ALTER TABLE session_reactions DISABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS session_reactions_session_idx ON session_reactions (session_id);
+CREATE INDEX IF NOT EXISTS session_reactions_owner_idx   ON session_reactions (owner_id);

@@ -9,13 +9,13 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <meta name="surzo-version" content="2026-05-13-6" />
+  <meta name="surzo-version" content="2026-05-13-7" />
   <title>Surzo</title>
   <script>
     // Force-update mechanism: poll the live HTML every 60s, compare version meta.
     // If changed, reload the page so the user always has the latest version.
     (function() {
-      const CURRENT_VERSION = '2026-05-13-6';
+      const CURRENT_VERSION = '2026-05-13-7';
       let checking = false;
       async function checkVersion() {
         if (checking) return;
@@ -520,6 +520,42 @@
       return (data ?? []).map(r => ({ user: byId[r.user_id], session: r.data, created_at: r.created_at }))
         .filter(x => x.user && x.session);
     }
+
+    // ─── Reactions (BeReal-style emoji stamps on friend cards) ────────────
+    async function addReaction(sessionId, ownerId, emoji) {
+      const uid = await getUserId();
+      if (!uid) return;
+      try {
+        await sb.from('session_reactions').upsert({
+          session_id: sessionId, owner_id: ownerId, reactor_id: uid, emoji,
+        }, { onConflict: 'session_id,reactor_id,emoji' });
+      } catch (e) { console.warn('addReaction', e); }
+    }
+    async function removeReaction(sessionId, emoji) {
+      const uid = await getUserId();
+      if (!uid) return;
+      try {
+        await sb.from('session_reactions').delete()
+          .eq('session_id', sessionId).eq('reactor_id', uid).eq('emoji', emoji);
+      } catch (e) { console.warn('removeReaction', e); }
+    }
+    async function getReactionsForSessions(sessionIds) {
+      if (!sessionIds.length) return {};
+      const uid = await getUserId();
+      try {
+        const { data } = await sb.from('session_reactions').select('session_id, emoji, reactor_id')
+          .in('session_id', sessionIds);
+        const grouped = {};
+        (data || []).forEach(r => {
+          if (!grouped[r.session_id]) grouped[r.session_id] = {};
+          if (!grouped[r.session_id][r.emoji]) grouped[r.session_id][r.emoji] = { count: 0, mine: false };
+          grouped[r.session_id][r.emoji].count++;
+          if (r.reactor_id === uid) grouped[r.session_id][r.emoji].mine = true;
+        });
+        return grouped;
+      } catch (e) { console.warn('getReactions', e); return {}; }
+    }
+    const REACTION_PALETTE = ['🔥', '💪', '👏', '🎉', '😎', '⚡', '📚', '💯', '🚀', '☕'];
 
     function calcTotal(s) {
       const avg = Math.round(s.averageWorkScore ?? 0);
@@ -1757,15 +1793,21 @@
             ) : (
               <>
                 <div className="flex items-center gap-4 mb-5">
-                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center flex-shrink-0 text-2xl font-black overflow-hidden"
+                  <button onClick={async () => {
+                    if (status !== 'accepted') return;
+                    if (confirm(`${name} さんをフレンドから削除しますか？`)) await handleRemove();
+                  }} className="w-16 h-16 rounded-2xl flex items-center justify-center flex-shrink-0 text-2xl font-black overflow-hidden active:scale-95 transition-transform"
                     style={{ background: '#d4f57a', color: '#000' }}>
                     {profile.avatar_url ? (
                       <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
                     ) : initials}
-                  </div>
+                  </button>
                   <div className="flex-1 min-w-0">
                     <div className="text-xl font-black tracking-tight truncate">{name}</div>
-                    <div className="text-zinc-600 text-xs mt-0.5">{profile.flag_emoji || '🌐'} {profile.country || '—'}</div>
+                    <div className="text-zinc-600 text-xs mt-0.5">
+                      {profile.flag_emoji || '🌐'} {profile.country || '—'}
+                      {status === 'accepted' && <span className="ml-1.5 text-zinc-700">· アイコンを押して削除</span>}
+                    </div>
                   </div>
                 </div>
 
@@ -1835,9 +1877,9 @@
                     ✓ リクエストを承認
                   </button>
                 ) : (
-                  <button onClick={handleRemove} disabled={busy}
-                    className="w-full bg-zinc-900 text-red-400 font-bold py-3.5 rounded-2xl">
-                    フレンドから削除
+                  <button onClick={onClose}
+                    className="w-full bg-zinc-900 text-zinc-400 font-bold py-3.5 rounded-2xl">
+                    閉じる
                   </button>
                 )}
               </>
@@ -2011,20 +2053,291 @@
       );
     }
 
+    // ─── Friend Feed Card (BeReal / share-card style) ────────────────────────
+    function FriendFeedCard({ item, reactions, onSelectUser, onReact }) {
+      const [detailOpen, setDetailOpen] = useState(false);
+      const c    = scoreColor(item.session.averageWorkScore);
+      const pts  = calcTotal(item.session);
+      const zone = getZone(item.session.averageWorkScore).label;
+      const uname = item.user.display_name || item.user.email_handle || '?';
+      const photoUrl = item.session.photoUri?.startsWith('https://') ? item.session.photoUri : null;
+      const rgba = (rgb, a) => rgb.replace('rgb(', 'rgba(').replace(')', `,${a})`);
+      const dateStr = new Date(item.session.endedAt || item.session.startedAt || item.created_at)
+                        .toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' });
+
+      return (
+        <>
+        <div className="relative rounded-3xl overflow-hidden shadow-2xl mb-4"
+             style={{ aspectRatio: '4/5', background: '#08080b' }}>
+          {/* Body — tappable for detail */}
+          <div onClick={() => setDetailOpen(true)} className="absolute inset-0 cursor-pointer">
+            {photoUrl ? (
+              <img src={photoUrl} className="absolute inset-0 w-full h-full object-cover" alt="" />
+            ) : (
+              <>
+                <div className="absolute inset-0" style={{ background: `radial-gradient(circle at 28% 30%, ${rgba(c, 0.42)} 0%, transparent 55%)` }} />
+                <div className="absolute inset-0" style={{ background: `radial-gradient(circle at 82% 86%, ${rgba(c, 0.20)} 0%, transparent 50%)` }} />
+              </>
+            )}
+            <div className="absolute inset-0" style={{
+              background: photoUrl
+                ? 'linear-gradient(180deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.05) 28%, rgba(0,0,0,0.30) 58%, rgba(0,0,0,0.92) 100%)'
+                : 'linear-gradient(180deg, transparent 0%, transparent 45%, rgba(0,0,0,0.55) 100%)',
+            }} />
+
+            {/* Top: avatar (tap → profile) + name/time, plus date right */}
+            <div className="absolute top-0 left-0 right-0 flex items-start justify-between px-5 pt-5">
+              <button onClick={(e) => { e.stopPropagation(); onSelectUser(item.user.id); }}
+                      className="flex items-center gap-2.5 min-w-0 max-w-[68%] active:scale-95 transition-transform">
+                <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 font-black overflow-hidden"
+                     style={{ background: '#d4f57a', color: '#000', fontSize: 13 }}>
+                  {item.user.avatar_url
+                    ? <img src={item.user.avatar_url} alt="" className="w-full h-full object-cover" />
+                    : uname.slice(0,2).toUpperCase()}
+                </div>
+                <div className="min-w-0 text-left">
+                  <div className="text-white font-bold text-sm truncate">{uname}</div>
+                  <div className="text-white/55 text-[10px] mt-0.5 truncate">{item.user.flag_emoji || '🌐'} · {timeAgo(item.created_at)}</div>
+                </div>
+              </button>
+              <span className="text-white/55 text-[10px] font-semibold mt-1 tabular-nums truncate ml-2">{dateStr}</span>
+            </div>
+
+            {/* Bottom — leaves ~52px space for reactions strip below */}
+            <div className="absolute bottom-[60px] left-0 right-0 px-5">
+              <div className="text-white font-black text-base leading-tight mb-0.5 truncate" style={{ letterSpacing: '-0.01em' }}>
+                {item.session.title}
+              </div>
+              <div className="text-white/55 text-[11px] tabular-nums mb-2">
+                {item.session.category} · {fmtMin(item.session.durationMinutes)}
+                {item.session.phoneDistractionCount > 0 && <span className="text-orange-400 ml-1.5">· 📱×{item.session.phoneDistractionCount}</span>}
+              </div>
+              <div className="flex items-end gap-3">
+                <div className="font-black tabular-nums leading-[0.82]"
+                     style={{ fontSize: 'clamp(72px, 22vw, 96px)', color: c, letterSpacing: '-0.06em',
+                              textShadow: photoUrl ? '0 4px 24px rgba(0,0,0,0.55)' : 'none' }}>
+                  {item.session.averageWorkScore}
+                </div>
+                <div className="pb-1.5 min-w-0">
+                  <div className="font-extrabold tracking-[2px] text-[9px] mb-1" style={{ color: c }}>{zone}</div>
+                  <div className="text-white/45 text-[8px] font-bold tracking-widest">WORK SCORE</div>
+                  <div className="flex items-baseline gap-1 mt-1">
+                    <span className="font-black text-white tabular-nums text-base">{fmtPts(pts)}</span>
+                    <span className="text-white/45 text-[8px] font-bold tracking-widest">PTS</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Reactions strip (absolute bottom) */}
+          <ReactionsStrip reactions={reactions} onReact={onReact} />
+        </div>
+
+        {detailOpen && (
+          <FriendSessionDetail item={item} reactions={reactions}
+            onReact={onReact} onSelectUser={onSelectUser}
+            onClose={() => setDetailOpen(false)} />
+        )}
+        </>
+      );
+    }
+
+    function ReactionsStrip({ reactions, onReact }) {
+      const [picking, setPicking] = useState(false);
+      const existing = Object.entries(reactions || {});
+      return (
+        <div className="absolute bottom-0 left-0 right-0 px-3 pb-3 z-10" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {existing.map(([emoji, info]) => (
+              <button key={emoji} onClick={() => onReact(emoji, info.mine)}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-full active:scale-95 transition-transform"
+                      style={{
+                        background: info.mine ? 'rgba(212,245,122,0.22)' : 'rgba(0,0,0,0.50)',
+                        backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+                        border: info.mine ? '1px solid rgba(212,245,122,0.55)' : '1px solid rgba(255,255,255,0.08)',
+                      }}>
+                <span style={{ fontSize: 14 }}>{emoji}</span>
+                <span className="text-white text-[11px] font-bold tabular-nums">{info.count}</span>
+              </button>
+            ))}
+            <button onClick={() => setPicking(p => !p)}
+                    className="w-8 h-8 rounded-full flex items-center justify-center active:scale-90 transition-transform"
+                    style={{ background: 'rgba(0,0,0,0.50)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' }}>
+              <span style={{ color: '#d4f57a', fontSize: 20, lineHeight: 1, marginTop: -2 }}>+</span>
+            </button>
+          </div>
+          {picking && (
+            <div className="absolute bottom-12 left-3 right-3 px-2.5 py-2 rounded-2xl flex items-center gap-1 flex-wrap shadow-2xl"
+                 style={{ background: 'rgba(28,28,32,0.95)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              {REACTION_PALETTE.map(e => {
+                const mine = reactions?.[e]?.mine;
+                return (
+                  <button key={e} onClick={() => { onReact(e, !!mine); setPicking(false); }}
+                          className="w-9 h-9 rounded-full flex items-center justify-center active:scale-90 hover:bg-white/10 transition-all">
+                    <span style={{ fontSize: 22, filter: mine ? 'none' : undefined, opacity: mine ? 0.5 : 1 }}>{e}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function FriendSessionDetail({ item, reactions, onReact, onSelectUser, onClose }) {
+      const c    = scoreColor(item.session.averageWorkScore);
+      const pts  = calcTotal(item.session);
+      const zone = getZone(item.session.averageWorkScore).label;
+      const uname = item.user.display_name || item.user.email_handle || '?';
+      const photoUrl = item.session.photoUri?.startsWith('https://') ? item.session.photoUri : null;
+      const rgba = (rgb, a) => rgb.replace('rgb(', 'rgba(').replace(')', `,${a})`);
+      const dateStr = new Date(item.session.endedAt || item.session.startedAt || item.created_at)
+                        .toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' });
+
+      return (
+        <div className="fixed inset-0 z-50 flex flex-col" style={{ background: 'rgba(0,0,0,0.92)', backdropFilter: 'blur(20px)' }}>
+          <div className="flex items-center justify-between px-5 pb-3" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0) + 14px)' }}>
+            <button onClick={onClose} className="text-white text-2xl w-10 h-10 flex items-center justify-center">×</button>
+            <span className="text-white/60 text-xs font-semibold">{dateStr}</span>
+            <div className="w-10" />
+          </div>
+          <div className="flex-1 overflow-y-auto px-5 pb-6">
+            {/* Hero card — same share-card layout, slightly fuller */}
+            <div className="relative rounded-3xl overflow-hidden shadow-2xl mb-4" style={{ aspectRatio: '4/5', background: '#08080b' }}>
+              {photoUrl ? (
+                <img src={photoUrl} className="absolute inset-0 w-full h-full object-cover" alt="" />
+              ) : (
+                <>
+                  <div className="absolute inset-0" style={{ background: `radial-gradient(circle at 28% 30%, ${rgba(c, 0.42)} 0%, transparent 55%)` }} />
+                  <div className="absolute inset-0" style={{ background: `radial-gradient(circle at 82% 86%, ${rgba(c, 0.20)} 0%, transparent 50%)` }} />
+                </>
+              )}
+              <div className="absolute inset-0" style={{
+                background: photoUrl
+                  ? 'linear-gradient(180deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.05) 28%, rgba(0,0,0,0.30) 58%, rgba(0,0,0,0.92) 100%)'
+                  : 'linear-gradient(180deg, transparent 0%, transparent 45%, rgba(0,0,0,0.55) 100%)',
+              }} />
+              <div className="absolute top-0 left-0 right-0 flex items-start justify-between px-5 pt-5">
+                <button onClick={() => { onClose(); onSelectUser(item.user.id); }} className="flex items-center gap-2.5 active:scale-95 transition-transform">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 font-black overflow-hidden"
+                       style={{ background: '#d4f57a', color: '#000', fontSize: 13 }}>
+                    {item.user.avatar_url
+                      ? <img src={item.user.avatar_url} alt="" className="w-full h-full object-cover" />
+                      : uname.slice(0,2).toUpperCase()}
+                  </div>
+                  <div className="text-left">
+                    <div className="text-white font-bold text-sm">{uname}</div>
+                    <div className="text-white/55 text-[10px] mt-0.5">{item.user.flag_emoji || '🌐'} · {timeAgo(item.created_at)}</div>
+                  </div>
+                </button>
+              </div>
+              <div className="absolute bottom-0 left-0 right-0 px-5 pb-5">
+                <div className="text-white font-black text-lg leading-tight mb-0.5">{item.session.title}</div>
+                <div className="text-white/55 text-[11px] tabular-nums mb-3">
+                  {item.session.category} · {fmtMin(item.session.durationMinutes)}
+                  {item.session.phoneDistractionCount > 0 && <span className="text-orange-400 ml-1.5">· 📱×{item.session.phoneDistractionCount}</span>}
+                </div>
+                <div className="flex items-end gap-3">
+                  <div className="font-black tabular-nums leading-[0.82]"
+                       style={{ fontSize: 'clamp(96px, 30vw, 132px)', color: c, letterSpacing: '-0.06em',
+                                textShadow: photoUrl ? '0 4px 32px rgba(0,0,0,0.55)' : 'none' }}>
+                    {item.session.averageWorkScore}
+                  </div>
+                  <div className="pb-2">
+                    <div className="font-extrabold tracking-[2.5px] text-[10px] mb-1.5" style={{ color: c }}>{zone}</div>
+                    <div className="text-white/45 text-[9px] font-bold tracking-widest mb-1">WORK SCORE</div>
+                    <div className="flex items-baseline gap-1">
+                      <span className="font-black text-white tabular-nums" style={{ fontSize: 20 }}>{fmtPts(pts)}</span>
+                      <span className="text-white/45 text-[9px] font-bold tracking-widest">PTS</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Reactions list — existing + palette */}
+            <div className="bg-zinc-900/60 rounded-2xl p-4">
+              <div className="text-[10px] font-bold tracking-widest text-zinc-500 mb-3">REACTIONS</div>
+              <div className="flex items-center gap-2 flex-wrap mb-3">
+                {Object.entries(reactions || {}).length === 0 ? (
+                  <div className="text-zinc-600 text-xs">まだスタンプがありません</div>
+                ) : (
+                  Object.entries(reactions).map(([emoji, info]) => (
+                    <button key={emoji} onClick={() => onReact(emoji, info.mine)}
+                            className="flex items-center gap-1 px-3 py-1.5 rounded-full active:scale-95 transition-transform"
+                            style={{
+                              background: info.mine ? 'rgba(212,245,122,0.22)' : 'rgba(255,255,255,0.06)',
+                              border: info.mine ? '1px solid rgba(212,245,122,0.55)' : '1px solid rgba(255,255,255,0.08)',
+                            }}>
+                      <span style={{ fontSize: 16 }}>{emoji}</span>
+                      <span className="text-white text-xs font-bold tabular-nums">{info.count}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+              <div className="text-[10px] font-bold tracking-widest text-zinc-500 mb-2">スタンプを送る</div>
+              <div className="grid grid-cols-5 gap-2">
+                {REACTION_PALETTE.map(e => {
+                  const mine = reactions?.[e]?.mine;
+                  return (
+                    <button key={e} onClick={() => onReact(e, !!mine)}
+                            className="aspect-square rounded-2xl flex items-center justify-center active:scale-90 transition-transform"
+                            style={{
+                              background: mine ? 'rgba(212,245,122,0.22)' : 'rgba(255,255,255,0.04)',
+                              border: mine ? '1px solid rgba(212,245,122,0.55)' : '1px solid rgba(255,255,255,0.06)',
+                            }}>
+                      <span style={{ fontSize: 30, opacity: mine ? 0.6 : 1 }}>{e}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     function FriendsScreen({ onSelectUser }) {
       const [feed, setFeed] = useState([]);
       const [friends, setFriends] = useState([]);
       const [requests, setRequests] = useState([]);
+      const [reactions, setReactions] = useState({}); // { sessionId: { emoji: { count, mine } } }
       const [loading, setLoading] = useState(true);
       const [sheetOpen, setSheetOpen] = useState(false);
 
       const reload = () => {
         setLoading(true);
         Promise.all([getFriendsFeed(30), getFriendsList(), getPendingRequests()])
-          .then(([f, fr, r]) => { setFeed(f); setFriends(fr); setRequests(r); })
+          .then(async ([f, fr, r]) => {
+            setFeed(f); setFriends(fr); setRequests(r);
+            const sids = f.map(x => x.session?.id).filter(Boolean);
+            const rx = await getReactionsForSessions(sids);
+            setReactions(rx);
+          })
           .finally(() => setLoading(false));
       };
       useEffect(() => { reload(); }, []);
+
+      const handleReact = async (sessionId, ownerId, emoji, alreadyMine) => {
+        // Optimistic update
+        setReactions(prev => {
+          const next = { ...prev };
+          const sess = { ...(next[sessionId] || {}) };
+          const cur = sess[emoji] || { count: 0, mine: false };
+          if (alreadyMine) {
+            const nc = Math.max(0, cur.count - 1);
+            if (nc === 0) delete sess[emoji];
+            else sess[emoji] = { count: nc, mine: false };
+          } else {
+            sess[emoji] = { count: cur.count + (cur.mine ? 0 : 1), mine: true };
+          }
+          next[sessionId] = sess;
+          return next;
+        });
+        if (alreadyMine) await removeReaction(sessionId, emoji);
+        else              await addReaction(sessionId, ownerId, emoji);
+      };
 
       return (
         <div className="px-5 pt-6 safe-pb">
@@ -2056,49 +2369,13 @@
               </div>
             ) : (
               <div>
-                {feed.map((item, i) => {
-                  const c = scoreColor(item.session.averageWorkScore);
-                  const pts = calcTotal(item.session);
-                  const uname = item.user.display_name || item.user.email_handle || '?';
-                  const hasPhoto = item.session.photoUri?.startsWith('https://');
-                  return (
-                    <div key={`${item.user.id}-${i}`} className="bg-zinc-900 rounded-2xl overflow-hidden mb-3">
-                      <button onClick={() => onSelectUser(item.user.id)} className="w-full flex items-center gap-3 px-4 pt-3.5 pb-3 text-left">
-                        <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 font-black"
-                          style={{ background: '#d4f57a', color: '#000', fontSize: 12 }}>
-                          {uname.slice(0,2).toUpperCase()}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-bold text-sm truncate">{uname}</div>
-                          <div className="text-[11px] text-zinc-600 mt-0.5">{item.user.flag_emoji || '🌐'} · {timeAgo(item.created_at)}</div>
-                        </div>
-                        <div className="font-black tabular-nums" style={{ fontSize: 26, color: c, letterSpacing: '-0.04em' }}>
-                          {item.session.averageWorkScore}
-                        </div>
-                      </button>
-                      {hasPhoto ? (
-                        <div className="relative" style={{ aspectRatio: '4/5' }}>
-                          <img src={item.session.photoUri} className="absolute inset-0 w-full h-full object-cover" alt="" />
-                          <div className="absolute inset-0" style={{ background: 'linear-gradient(to bottom, transparent 55%, rgba(0,0,0,0.82) 100%)' }} />
-                          <div className="absolute bottom-0 left-0 right-0 px-4 pb-3.5">
-                            <div className="font-semibold text-sm text-white truncate">{item.session.title}</div>
-                            <div className="text-[11px] mt-0.5" style={{ color: c + 'cc' }}>
-                              {fmtPts(pts)} pts · {fmtMin(item.session.durationMinutes)}
-                              {item.session.phoneDistractionCount > 0 && <span className="text-orange-400 ml-1.5">· 📱×{item.session.phoneDistractionCount}</span>}
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="px-4 pb-4">
-                          <div className="font-semibold text-sm text-zinc-200 truncate">{item.session.title}</div>
-                          <div className="text-xs mt-0.5 text-zinc-500">
-                            {fmtPts(pts)} pts · {fmtMin(item.session.durationMinutes)}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                {feed.map((item, i) => (
+                  <FriendFeedCard key={`${item.user.id}-${item.session.id}-${i}`}
+                    item={item}
+                    reactions={reactions[item.session.id] || {}}
+                    onSelectUser={onSelectUser}
+                    onReact={(emoji, mine) => handleReact(item.session.id, item.user.id, emoji, mine)} />
+                ))}
               </div>
             )
           )}

@@ -13,42 +13,31 @@ import Ranking       from './components/Ranking.jsx';
 import Onboarding    from './components/Onboarding.jsx';
 import MobilePrompt  from './components/MobilePrompt.jsx';
 
-function UpdateBanner({ info, progress, ready, onClose }) {
+function UpdateBanner({ info, ready, onClose }) {
   if (!info) return null;
   const auto = info.autoApply;
-
-  let label;
-  if (!auto)                  label = `v${info.version} が利用可能です`;
-  else if (ready)             label = `v${info.version} の準備ができました`;
-  else if (progress != null)  label = `v${info.version} をダウンロード中… ${progress}%`;
-  else                        label = `v${info.version} を取得中…`;
+  // Background-download path: stay silent until ZIP/DMG is fully downloaded
+  if (auto && !ready) return null;
 
   return (
     <div style={{
       position: 'fixed', top: 0, left: 0, right: 0, zIndex: 99999,
       background: 'var(--accent)', color: '#06060a',
-      padding: '9px 16px', display: 'flex', alignItems: 'center',
-      justifyContent: 'space-between', fontSize: 13, fontWeight: 700,
+      padding: '8px 12px', display: 'flex', alignItems: 'center',
+      gap: 8, flexWrap: 'nowrap', minWidth: 0,
+      fontSize: 12, fontWeight: 700,
       boxShadow: '0 2px 16px rgba(0,0,0,0.18)',
     }}>
-      <span>{label}</span>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        {auto && ready && (
-          <button
-            onClick={() => window.electronAPI?.applyUpdate?.()}
-            style={{ background: '#06060a', color: 'var(--accent)', border: 'none', borderRadius: 6, padding: '4px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-            再起動して更新
-          </button>
-        )}
-        {!auto && (
-          <button
-            onClick={() => window.electronAPI?.openExternal(info.url)}
-            style={{ background: '#06060a', color: 'var(--accent)', border: 'none', borderRadius: 6, padding: '4px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-            更新する
-          </button>
-        )}
-        <button onClick={onClose} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 16, color: '#06060a', opacity: 0.65, padding: '0 4px', lineHeight: 1 }}>✕</button>
-      </div>
+      <span style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        v{info.version} {auto ? 'の準備完了' : 'が利用可能'}
+      </span>
+      <button
+        onClick={() => auto ? window.electronAPI?.applyUpdate?.() : window.electronAPI?.openExternal(info.url)}
+        style={{ flexShrink: 0, background: '#06060a', color: 'var(--accent)', border: 'none', borderRadius: 6, padding: '5px 11px', fontSize: 12, fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+        {auto ? '再起動して更新' : '更新する'}
+      </button>
+      <button onClick={onClose}
+        style={{ flexShrink: 0, background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 16, color: '#06060a', opacity: 0.65, padding: '0 2px', lineHeight: 1 }}>✕</button>
     </div>
   );
 }
@@ -359,7 +348,7 @@ export default function App() {
     setShowMobilePrompt(false);
   };
 
-  const banner = <UpdateBanner info={updateInfo} progress={updateProgress} ready={updateReady} onClose={() => setUpdateInfo(null)} />;
+  const banner = <UpdateBanner info={updateInfo} ready={updateReady} onClose={() => setUpdateInfo(null)} />;
 
   if (screen === 'settings')
     return <>{banner}{drag}<Settings onBack={() => setScreen('dashboard')} theme={theme} onToggleTheme={toggleTheme} onShowOnboarding={() => { localStorage.removeItem('surzo-onboarding-v4'); setShowOnboarding(true); setScreen('dashboard'); }} /></>;
