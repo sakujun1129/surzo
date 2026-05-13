@@ -175,25 +175,52 @@ export default function Widget() {
     return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(' ') : '';
 
-  const musicVisible = hovering && nowPlaying;
+  const [musicHover, setMusicHover] = useState(false);
+  const musicHoverRef      = useRef(false);
+  const pillHoverRef       = useRef(false);
+  const musicHoverTimerRef = useRef(null);
 
-  const handleHoverEnter = () => {
-    setHovering(true);
-    window.electronAPI?.setWidgetMouse?.(false);
+  // Drive setIgnoreMouseEvents from the union of hover states. Refs so we
+  // always read the latest value (state updates are async).
+  const syncMouseIgnore = () => {
+    const anyHover = pillHoverRef.current || musicHoverRef.current;
+    window.electronAPI?.setWidgetMouse?.(!anyHover);
   };
-  const handleHoverLeave = () => {
-    setHovering(false);
+
+  const enterMusicArea = () => {
+    if (musicHoverTimerRef.current) { clearTimeout(musicHoverTimerRef.current); musicHoverTimerRef.current = null; }
+    musicHoverRef.current = true;
+    setMusicHover(true);
+    syncMouseIgnore();
+  };
+  const leaveMusicArea = () => {
+    if (musicHoverTimerRef.current) clearTimeout(musicHoverTimerRef.current);
+    musicHoverTimerRef.current = setTimeout(() => {
+      musicHoverRef.current = false;
+      setMusicHover(false);
+      syncMouseIgnore();
+    }, 140);
+  };
+
+  const handlePillEnter = () => {
+    pillHoverRef.current = true;
+    syncMouseIgnore();
+  };
+  const handlePillLeave = () => {
     if (!draggingRef.current && !longPressedRef.current && pressStartRef.current) {
       if (holdTimerRef.current) { clearTimeout(holdTimerRef.current); holdTimerRef.current = null; }
       pressStartRef.current = 0;
     }
-    window.electronAPI?.setWidgetMouse?.(true);
+    pillHoverRef.current = false;
+    syncMouseIgnore();
   };
 
+  const musicVisible = musicHover && nowPlaying;
+
   return (
-    <div className="wr" onMouseEnter={handleHoverEnter} onMouseLeave={handleHoverLeave}>
+    <div className="wr">
       {musicVisible && (
-        <div className="wnp">
+        <div className="wnp" onMouseEnter={enterMusicArea} onMouseLeave={leaveMusicArea}>
           <div className="wnp-info" onClick={() => window.electronAPI?.openMediaApp?.(nowPlaying.app)}>
             <div className="wnp-title" title={nowPlaying.title}>{nowPlaying.title || '—'}</div>
             <div className="wnp-artist" title={`${nowPlaying.artist} · ${nowPlaying.app}`}>
@@ -220,6 +247,8 @@ export default function Widget() {
       <div
         className={`wp${alertMsg ? ' wp-open' : ''}${dragging ? ' wp-dragging' : ''}`}
         onMouseDown={handleMouseDown}
+        onMouseEnter={handlePillEnter}
+        onMouseLeave={handlePillLeave}
       >
         <div className="wrow">
           {phoneActive
@@ -250,6 +279,20 @@ export default function Widget() {
 
           <span className="wdiv" />
           <span className="wm">{fmtTimer(update.elapsed)}</span>
+
+          {nowPlaying && (
+            <span
+              className={`wnp-trigger${musicHover ? ' wnp-trigger-on' : ''}${nowPlaying.state === 'playing' ? ' wnp-trigger-playing' : ''}`}
+              onMouseEnter={(e) => { e.stopPropagation(); enterMusicArea(); }}
+              onMouseLeave={(e) => { e.stopPropagation(); leaveMusicArea(); }}
+              onMouseDown={(e) => e.stopPropagation()}
+              aria-label="now playing"
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M9 17V5l11-2v12.5a3.5 3.5 0 1 1-2-3.15V5.5L11 7v9.5a3.5 3.5 0 1 1-2-3.15z"/>
+              </svg>
+            </span>
+          )}
         </div>
 
         <div className={`wa${alertMsg ? ' wa-show' : ''}`}

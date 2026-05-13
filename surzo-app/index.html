@@ -9,13 +9,13 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <meta name="surzo-version" content="2026-05-13-9" />
+  <meta name="surzo-version" content="2026-05-13-10" />
   <title>Surzo</title>
   <script>
     // Force-update mechanism: poll the live HTML every 60s, compare version meta.
     // If changed, reload the page so the user always has the latest version.
     (function() {
-      const CURRENT_VERSION = '2026-05-13-9';
+      const CURRENT_VERSION = '2026-05-13-10';
       let checking = false;
       async function checkVersion() {
         if (checking) return;
@@ -294,10 +294,14 @@
     }
 
     // ─── Scoring ─────────────────────────────────────────────────────────────
-    function calcLiveScore(elapsedMin, phoneCount, phoneMins) {
-      const base = 75;
-      const penalty = Math.min(35, phoneCount * 5 + phoneMins * 0.8);
-      return Math.round(Math.max(15, base - penalty));
+    // `ongoingMins` is the duration of the current active phone-leave (if any).
+    // It applies a sharp temporary penalty that disappears the moment the user
+    // returns, on top of the slow cumulative penalty driven by phoneMins.
+    function calcLiveScore(elapsedMin, phoneCount, phoneMins, ongoingMins = 0) {
+      const base       = 75;
+      const cumulative = Math.min(20, phoneCount * 4 + phoneMins * 0.8);
+      const active     = Math.min(40, ongoingMins * 12); // 1 min → -12, ~3.3 min caps at -40
+      return Math.round(Math.max(5, base - cumulative - active));
     }
     function calcMobileScore(durMin, phoneCount, phoneMins) {
       const phoneRatio = durMin > 0 ? phoneMins/durMin : 0;
@@ -1538,8 +1542,17 @@
     // ─── Mobile Session ──────────────────────────────────────────────────────
     function MobileSession({ session, onUpdate, onEnd, onPhoto, checkActive, onCheckPhone }) {
       const [uploading, setUploading] = useState(false);
-      const ongoingMins = session.phoneStart ? (Date.now() - session.phoneStart)/60000 : 0;
-      const score = calcLiveScore(session.elapsed/60, session.phoneCount, session.phoneMins + ongoingMins);
+      const [now, setNow] = useState(Date.now());
+      // While the user is away, tick at ~1Hz so the displayed leave timer
+      // and the sharp ongoing penalty update smoothly.
+      useEffect(() => {
+        if (!session.phoneStart) return;
+        const id = setInterval(() => setNow(Date.now()), 1000);
+        return () => clearInterval(id);
+      }, [session.phoneStart]);
+      const ongoingSecs = session.phoneStart ? Math.floor((now - session.phoneStart) / 1000) : 0;
+      const ongoingMins = ongoingSecs / 60;
+      const score = calcLiveScore(session.elapsed/60, session.phoneCount, session.phoneMins, ongoingMins);
       const zone = getZone(score);
       const progress = session.plannedMinutes > 0 ? Math.min(100, (session.elapsed/60/session.plannedMinutes)*100) : 0;
       const photos = session.photos || [];
@@ -1590,12 +1603,24 @@
             )}
           </div>
 
-          <div className="bg-zinc-900 rounded-2xl px-5 py-4 flex items-center justify-between mb-2.5">
-            <div className="text-[10px] font-bold tracking-widest text-zinc-600">スマホ離脱</div>
-            <div className="font-black tabular-nums"
-              style={{ fontSize: 24, color: session.phoneCount > 0 ? '#fb923c' : '#3f3f46' }}>
-              {session.phoneCount} 回
+          <div className={`rounded-2xl px-5 py-4 mb-2.5 transition-colors ${session.phoneStart ? '' : 'bg-zinc-900'}`}
+               style={session.phoneStart ? { background: 'rgba(251,146,60,0.12)', border: '1px solid rgba(251,146,60,0.30)' } : undefined}>
+            <div className="flex items-center justify-between">
+              <div className="text-[10px] font-bold tracking-widest" style={{ color: session.phoneStart ? '#fb923c' : '#52525b' }}>
+                {session.phoneStart ? '🚪 離脱中' : 'スマホ離脱'}
+              </div>
+              <div className="font-black tabular-nums"
+                style={{ fontSize: 24, color: session.phoneStart ? '#fb923c' : (session.phoneCount > 0 ? '#fb923c' : '#3f3f46') }}>
+                {session.phoneStart
+                  ? fmtTimer(ongoingSecs)
+                  : `${session.phoneCount} 回`}
+              </div>
             </div>
+            {session.phoneStart && (
+              <div className="text-[10px] text-orange-400/70 mt-1.5 tabular-nums">
+                点数 −{Math.round(Math.min(40, ongoingMins * 12))} · 戻ると即回復
+              </div>
+            )}
           </div>
 
           <button onClick={onCheckPhone}

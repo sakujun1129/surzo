@@ -679,17 +679,31 @@ function isPositionOnScreen(pos) {
   });
 }
 
+function migrateSavedWidgetPosIfNeeded() {
+  // Old layout used a 130-tall window with the pill anchored 4px from the top.
+  // New layout uses 200-tall with the pill anchored 70px from the top.
+  // Saved positions from the old layout now place the pill ~66px too low.
+  const cfg = loadConfig();
+  if (cfg.widgetPos && !cfg.widgetPosLayoutV2) {
+    saveConfig({
+      widgetPos: { x: cfg.widgetPos.x, y: cfg.widgetPos.y - 66 },
+      widgetPosLayoutV2: true,
+    });
+  }
+}
+
 function repositionWidget() {
   if (!widgetWindow) return;
+  migrateSavedWidgetPosIfNeeded();
   const saved = loadConfig().widgetPos;
   if (saved && isPositionOnScreen(saved)) {
     widgetWindow.setPosition(Math.round(saved.x), Math.round(saved.y));
     return;
   }
   const { workArea } = screen.getPrimaryDisplay();
-  // Window is 280×200. Pill is anchored 70px from the window top via CSS,
-  // so pill_top_screen_y = window_y + 70. To keep the pill ~44px above the
-  // dock, window_y = workArea_bottom - 44 - 70 = workArea_bottom - 114.
+  // Window is 280×200. Pill anchored 70px from the window top via CSS,
+  // so pill_top_screen_y = window_y + 70. Pill ~44px above the dock →
+  // window_y = workArea_bottom - 44 - 70 = workArea_bottom - 114.
   widgetWindow.setPosition(
     Math.floor((workArea.width - 280) / 2),
     workArea.y + workArea.height - 114

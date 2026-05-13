@@ -25,17 +25,16 @@ html, body, #root {
   transform: translateX(-50%);
   display: inline-flex;
   flex-direction: column;
-  background: rgba(10, 10, 14, 0.55);
-  backdrop-filter:        blur(42px) saturate(180%) brightness(1.04);
-  -webkit-backdrop-filter: blur(42px) saturate(180%) brightness(1.04);
+  background: rgba(8, 8, 12, 0.78);
+  backdrop-filter:        blur(48px) saturate(180%) brightness(1.04);
+  -webkit-backdrop-filter: blur(48px) saturate(180%) brightness(1.04);
   border: 1px solid rgba(255, 255, 255, 0.10);
   border-top-color: rgba(255, 255, 255, 0.18);
   border-radius: 14px;
   overflow: hidden;
   box-shadow:
-    0 0 0 0.5px rgba(0,0,0,0.55),
-    0 8px 24px rgba(0,0,0,0.32),
-    0 1px 3px rgba(0,0,0,0.18),
+    0 10px 26px rgba(0,0,0,0.36),
+    0 1px 3px rgba(0,0,0,0.20),
     inset 0 1px 0 rgba(255,255,255,0.07);
   cursor: pointer;
   transition:
@@ -46,10 +45,9 @@ html, body, #root {
 }
 
 .wp.wp-open {
-  background: rgba(10, 10, 14, 0.68);
+  background: rgba(8, 8, 12, 0.85);
   box-shadow:
-    0 0 0 0.5px rgba(0,0,0,0.7),
-    0 12px 32px rgba(0,0,0,0.40),
+    0 14px 34px rgba(0,0,0,0.44),
     0 2px 6px rgba(0,0,0,0.22),
     inset 0 1px 0 rgba(255,255,255,0.08);
 }
@@ -123,6 +121,33 @@ html, body, #root {
   flex-shrink: 0;
 }
 
+/* Music-note trigger in pill (only shown when something is playing) */
+.wnp-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 16px;
+  margin-left: 2px;
+  margin-right: -2px;
+  border-radius: 5px;
+  color: rgba(212, 245, 122, 0.85);
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease;
+}
+.wnp-trigger:hover, .wnp-trigger-on {
+  background: rgba(212, 245, 122, 0.16);
+  color: #d4f57a;
+}
+.wnp-trigger-playing svg {
+  animation: noteBob 1.6s ease-in-out infinite;
+}
+@keyframes noteBob {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50%      { transform: translateY(-1.5px) rotate(-6deg); }
+}
+
 /* Alert area (below pill row) */
 .wa {
   max-height: 0;
@@ -166,16 +191,14 @@ html, body, #root {
   width: 260px;
   max-width: calc(100% - 8px);
   padding: 8px 10px 8px 12px;
-  background: rgba(14, 14, 20, 0.58);
-  backdrop-filter:        blur(46px) saturate(180%) brightness(1.04);
-  -webkit-backdrop-filter: blur(46px) saturate(180%) brightness(1.04);
+  background: rgba(8, 8, 12, 0.78);
+  backdrop-filter:        blur(52px) saturate(180%) brightness(1.04);
+  -webkit-backdrop-filter: blur(52px) saturate(180%) brightness(1.04);
   border: 1px solid rgba(255, 255, 255, 0.10);
   border-top-color: rgba(255, 255, 255, 0.18);
   border-radius: 18px;
   box-shadow:
-    0 0 0 0.5px rgba(0,0,0,0.55),
-    0 14px 36px rgba(0,0,0,0.42),
-    0 2px 6px rgba(0,0,0,0.20),
+    0 14px 36px rgba(0,0,0,0.40),
     inset 0 1px 0 rgba(255,255,255,0.07);
   animation: musicIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
