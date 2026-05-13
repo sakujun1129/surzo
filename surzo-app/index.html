@@ -9,13 +9,13 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <meta name="surzo-version" content="2026-05-13-10" />
+  <meta name="surzo-version" content="2026-05-13-11" />
   <title>Surzo</title>
   <script>
     // Force-update mechanism: poll the live HTML every 60s, compare version meta.
     // If changed, reload the page so the user always has the latest version.
     (function() {
-      const CURRENT_VERSION = '2026-05-13-10';
+      const CURRENT_VERSION = '2026-05-13-11';
       let checking = false;
       async function checkVersion() {
         if (checking) return;
@@ -1761,6 +1761,51 @@
     }
 
     // ─── Records ─────────────────────────────────────────────────────────────
+    function RecordCard({ session: s, onDetail }) {
+      const [ref, revealed] = useReveal();
+      const c = scoreColor(s.averageWorkScore);
+      const pts = calcTotal(s);
+      const animPts = useCountUp(pts, 700, revealed);
+      const circ = 2 * Math.PI * 42;
+      const ringArc = (revealed ? Math.min(s.averageWorkScore / 100, 1) : 0) * circ;
+      return (
+        <button ref={ref} onClick={() => onDetail(s)}
+          className={`bg-zinc-900 rounded-2xl overflow-hidden text-left relative reveal ${revealed ? 'in' : ''}`}
+          style={{ aspectRatio: '3/4' }}>
+          {s.photoUri?.startsWith('https://') ? (
+            <>
+              <img src={s.photoUri} className="absolute inset-0 w-full h-full object-cover" />
+              <div className="absolute inset-0" style={{ background: 'linear-gradient(to bottom, transparent 40%, rgba(0,0,0,0.85) 100%)' }} />
+              <div className="absolute bottom-0 left-0 right-0 px-2.5 pb-2.5">
+                <div className="font-black tabular-nums text-lg leading-none" style={{ color: c }}>{fmtPts(animPts)}</div>
+                <div className="text-[9px] mt-0.5" style={{ color: c + 'aa' }}>avg {s.averageWorkScore}</div>
+                <div className="text-[10px] font-semibold mt-1.5 truncate text-white/70">{s.title}</div>
+                <div className="text-[9px] mt-0.5 text-white/40">{isToday(s.startedAt) ? '今日' : new Date(s.startedAt).toLocaleDateString('ja-JP', { month:'short', day:'numeric' })} · {fmtMin(s.durationMinutes)}</div>
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-col items-center justify-between pt-4 pb-3 px-2 h-full">
+              <svg viewBox="0 0 104 104" width="84" height="84">
+                <circle cx="52" cy="52" r="42" fill="none" stroke={c} strokeWidth="7" strokeOpacity="0.13" />
+                <circle cx="52" cy="52" r="42" fill="none" stroke={c} strokeWidth="7"
+                  strokeDasharray={`${ringArc} ${circ}`}
+                  strokeLinecap="round" transform="rotate(-90 52 52)"
+                  style={{ transition: 'stroke-dasharray 0.95s cubic-bezier(0.16,1,0.3,1)' }} />
+                <text x="52" y="48" textAnchor="middle" dominantBaseline="middle"
+                  fontSize="20" fontWeight="900" fill={c}>{fmtPts(animPts)}</text>
+                <text x="52" y="66" textAnchor="middle" dominantBaseline="middle"
+                  fontSize="9" fontWeight="600" fill={c} fillOpacity="0.4">avg {s.averageWorkScore}</text>
+              </svg>
+              <div className="w-full text-center">
+                <div className="text-[10px] font-semibold leading-tight truncate text-zinc-400">{s.title}</div>
+                <div className="text-[9px] mt-0.5 text-zinc-600">{isToday(s.startedAt) ? '今日' : new Date(s.startedAt).toLocaleDateString('ja-JP', { month:'short', day:'numeric' })} · {fmtMin(s.durationMinutes)}</div>
+              </div>
+            </div>
+          )}
+        </button>
+      );
+    }
+
     function RecordsScreen({ onDetail }) {
       const [sessions, setSessions] = useState(null);
       const { setRefresh } = useContext(RefreshContext);
@@ -1830,44 +1875,9 @@
           ) : (
           /* Photo grid */
           <div className="grid grid-cols-3 gap-2">
-            {sessions.map(s => {
-              const c = scoreColor(s.averageWorkScore);
-              const pts = calcTotal(s);
-              return (
-                <button key={s.id} onClick={() => onDetail(s)}
-                  className="bg-zinc-900 rounded-2xl overflow-hidden text-left relative" style={{ aspectRatio: '3/4' }}>
-                  {s.photoUri?.startsWith('https://') ? (
-                    <>
-                      <img src={s.photoUri} className="absolute inset-0 w-full h-full object-cover" />
-                      <div className="absolute inset-0" style={{ background: 'linear-gradient(to bottom, transparent 40%, rgba(0,0,0,0.85) 100%)' }} />
-                      <div className="absolute bottom-0 left-0 right-0 px-2.5 pb-2.5">
-                        <div className="font-black tabular-nums text-lg leading-none" style={{ color: c }}>{fmtPts(pts)}</div>
-                        <div className="text-[9px] mt-0.5" style={{ color: c + 'aa' }}>avg {s.averageWorkScore}</div>
-                        <div className="text-[10px] font-semibold mt-1.5 truncate text-white/70">{s.title}</div>
-                        <div className="text-[9px] mt-0.5 text-white/40">{isToday(s.startedAt) ? '今日' : new Date(s.startedAt).toLocaleDateString('ja-JP', { month:'short', day:'numeric' })} · {fmtMin(s.durationMinutes)}</div>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="flex flex-col items-center justify-between pt-4 pb-3 px-2 h-full">
-                      <svg viewBox="0 0 104 104" width="84" height="84">
-                        <circle cx="52" cy="52" r="42" fill="none" stroke={c} strokeWidth="7" strokeOpacity="0.13" />
-                        <circle cx="52" cy="52" r="42" fill="none" stroke={c} strokeWidth="7"
-                          strokeDasharray={`${Math.min(s.averageWorkScore/100,1) * 2*Math.PI*42} ${2*Math.PI*42}`}
-                          strokeLinecap="round" transform="rotate(-90 52 52)" />
-                        <text x="52" y="48" textAnchor="middle" dominantBaseline="middle"
-                          fontSize="20" fontWeight="900" fill={c}>{fmtPts(pts)}</text>
-                        <text x="52" y="66" textAnchor="middle" dominantBaseline="middle"
-                          fontSize="9" fontWeight="600" fill={c} fillOpacity="0.4">avg {s.averageWorkScore}</text>
-                      </svg>
-                      <div className="w-full text-center">
-                        <div className="text-[10px] font-semibold leading-tight truncate text-zinc-400">{s.title}</div>
-                        <div className="text-[9px] mt-0.5 text-zinc-600">{isToday(s.startedAt) ? '今日' : new Date(s.startedAt).toLocaleDateString('ja-JP', { month:'short', day:'numeric' })} · {fmtMin(s.durationMinutes)}</div>
-                      </div>
-                    </div>
-                  )}
-                </button>
-              );
-            })}
+            {sessions.map(s => (
+              <RecordCard key={s.id} session={s} onDetail={onDetail} />
+            ))}
           </div>
           )}
           </div>
@@ -3561,6 +3571,10 @@
           const ts = Date.now();
           bgStartRef.current = ts;
           sessionStorage.setItem('surzo-bg-start', String(ts));
+          // Reflect the away state on the mobile session for the live timer card
+          if (hasMobile) {
+            setMobileSession(prev => prev ? { ...prev, phoneStart: ts } : prev);
+          }
           // Best-effort send to PC immediately — may fail if iOS suspends, but comeBack will recover
           if (pcId) sendPhoneEventBeacon(pcId, 'start');
         };
@@ -3571,7 +3585,7 @@
             checkRef.current = false;
             checkStartRef.current = null;
             setCheckActive(false);
-            setMobileSession(prev => prev ? { ...prev, phoneMins: prev.phoneMins + mins } : prev);
+            setMobileSession(prev => prev ? { ...prev, phoneMins: prev.phoneMins + mins, phoneStart: null } : prev);
             return;
           }
           if (!bgStartRef.current) return;
@@ -3580,11 +3594,12 @@
           sessionStorage.removeItem('surzo-bg-start');
           const mins = awayMs / 60000;
           const significant = mins > 0.05; // >3s counts as distraction
-          if (significant && hasMobile) {
+          if (hasMobile) {
             setMobileSession(prev => prev ? {
               ...prev,
-              phoneCount: prev.phoneCount + 1,
-              phoneMins: prev.phoneMins + mins,
+              phoneCount: significant ? prev.phoneCount + 1 : prev.phoneCount,
+              phoneMins: significant ? prev.phoneMins + mins : prev.phoneMins,
+              phoneStart: null,
             } : prev);
           }
           if (pcId && significant) {
@@ -3637,32 +3652,38 @@
         setTimeout(() => fetchRef.current?.(), 1500);
         setTimeout(() => fetchRef.current?.(), 3500);
       };
-      const handleCheckPhone = () => {
-        if (!checkRef.current) {
-          checkRef.current = true;
-          checkStartRef.current = Date.now();
-          setCheckActive(true);
-          setMobileSession(prev => prev ? { ...prev, phoneCount: prev.phoneCount + 1 } : prev);
-        } else {
-          const mins = (Date.now() - checkStartRef.current) / 60000;
-          checkRef.current = false;
-          checkStartRef.current = null;
-          setCheckActive(false);
-          setMobileSession(prev => prev ? { ...prev, phoneMins: prev.phoneMins + mins } : prev);
-        }
+      const startCheck = () => {
+        if (checkRef.current) return;
+        checkRef.current = true;
+        checkStartRef.current = Date.now();
+        setCheckActive(true);
+        setMobileSession(prev => prev ? { ...prev, phoneCount: prev.phoneCount + 1, phoneStart: Date.now() } : prev);
       };
+      const endCheck = () => {
+        if (!checkRef.current) return;
+        const mins = (Date.now() - checkStartRef.current) / 60000;
+        checkRef.current = false;
+        checkStartRef.current = null;
+        setCheckActive(false);
+        setMobileSession(prev => prev ? { ...prev, phoneMins: prev.phoneMins + mins, phoneStart: null } : prev);
+      };
+      const handleCheckPhone = () => { checkRef.current ? endCheck() : startCheck(); };
       const handlePhoto = (uri) => {
         setMobileSession(prev => prev ? { ...prev, photos: [...(prev.photos || []), uri].slice(0,3) } : prev);
       };
       const handleStopPc = async () => {
+        // Optimistic: snap the UI to "no PC session" right away, then fire
+        // the stop command and delete the live_sessions row in parallel.
+        // The 8s fallback timeout was the lag the user felt.
         setStoppingPc(true);
-        try { await sendSessionCommand('stop', {}); } catch (_e) { setStoppingPc(false); return; }
-        setTimeout(async () => {
+        setPcSession(null);
+        try {
           const uid = await getUserId();
-          if (!uid) return;
-          const { data } = await sb.from('live_sessions').select('session_id').eq('user_id', uid).maybeSingle();
-          if (data) { await sb.from('live_sessions').delete().eq('user_id', uid); setPcSession(null); }
-        }, 8000);
+          await Promise.allSettled([
+            sendSessionCommand('stop', {}),
+            uid ? sb.from('live_sessions').delete().eq('user_id', uid) : Promise.resolve(),
+          ]);
+        } catch (_e) {}
       };
       const handleEnd = async () => {
         if (!mobileSession) return;

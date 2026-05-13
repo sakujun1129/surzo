@@ -701,12 +701,12 @@ function repositionWidget() {
     return;
   }
   const { workArea } = screen.getPrimaryDisplay();
-  // Window is 280×200. Pill anchored 70px from the window top via CSS,
-  // so pill_top_screen_y = window_y + 70. Pill ~44px above the dock →
-  // window_y = workArea_bottom - 44 - 70 = workArea_bottom - 114.
+  // Window is 280×200. Pill anchored 70px from window top via CSS.
+  // Park the pill just above the dock with only a tiny visual gap.
+  // workArea_bottom - 102 puts the pill bottom ~4px above the dock.
   widgetWindow.setPosition(
     Math.floor((workArea.width - 280) / 2),
-    workArea.y + workArea.height - 114
+    workArea.y + workArea.height - 102
   );
 }
 
