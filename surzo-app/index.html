@@ -9,13 +9,13 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <meta name="surzo-version" content="2026-05-13-8" />
+  <meta name="surzo-version" content="2026-05-13-9" />
   <title>Surzo</title>
   <script>
     // Force-update mechanism: poll the live HTML every 60s, compare version meta.
     // If changed, reload the page so the user always has the latest version.
     (function() {
-      const CURRENT_VERSION = '2026-05-13-8';
+      const CURRENT_VERSION = '2026-05-13-9';
       let checking = false;
       async function checkVersion() {
         if (checking) return;
@@ -74,6 +74,38 @@
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
       min-height: 0;
+      scroll-behavior: smooth;
+      overscroll-behavior-y: contain;
+    }
+    .ptr-wrap {
+      position: relative;
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .ptr-indicator {
+      position: absolute; top: 0; left: 0; right: 0;
+      display: flex; justify-content: center; pointer-events: none; z-index: 30;
+      padding-top: calc(env(safe-area-inset-top, 0) + 12px);
+    }
+    .ptr-indicator > div {
+      width: 36px; height: 36px; border-radius: 18px;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(212,245,122,0.16);
+      backdrop-filter: blur(14px) saturate(180%);
+      -webkit-backdrop-filter: blur(14px) saturate(180%);
+      border: 1px solid rgba(212,245,122,0.32);
+    }
+    .reveal {
+      opacity: 0;
+      transform: translateY(14px) scale(0.985);
+      transition: opacity 0.55s cubic-bezier(0.16,1,0.3,1), transform 0.55s cubic-bezier(0.16,1,0.3,1);
+      will-change: opacity, transform;
+    }
+    .reveal.in {
+      opacity: 1;
+      transform: translateY(0) scale(1);
     }
     ::-webkit-scrollbar { width: 0; display: none; }
     input[type=range] {
@@ -101,7 +133,100 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useRef, useMemo } = React;
+    const { useState, useEffect, useRef, useMemo, useContext, createContext, useCallback } = React;
+
+    // ─── Pull-to-refresh + reveal-on-scroll utilities ────────────────────────
+    const RefreshContext = createContext({ setRefresh: () => {} });
+
+    function PullToRefresh({ onRefresh, children }) {
+      const scrollerRef = useRef(null);
+      const startYRef   = useRef(null);
+      const [pull, setPull]             = useState(0);
+      const [refreshing, setRefreshing] = useState(false);
+
+      const onTouchStart = (e) => {
+        if (refreshing) return;
+        if ((scrollerRef.current?.scrollTop ?? 0) > 4) return;
+        startYRef.current = e.touches[0].clientY;
+      };
+      const onTouchMove = (e) => {
+        if (startYRef.current == null) return;
+        if ((scrollerRef.current?.scrollTop ?? 0) > 4) {
+          startYRef.current = null; setPull(0); return;
+        }
+        const dy = e.touches[0].clientY - startYRef.current;
+        if (dy > 0) setPull(Math.min(120, dy * 0.55));
+      };
+      const onTouchEnd = async () => {
+        if (startYRef.current == null) return;
+        startYRef.current = null;
+        if (pull >= 64) {
+          if (navigator.vibrate) try { navigator.vibrate(8); } catch (_e) {}
+          setRefreshing(true);
+          try { await onRefresh?.(); } catch (_e) {}
+          await new Promise(r => setTimeout(r, 300));
+          setRefreshing(false);
+        }
+        setPull(0);
+      };
+
+      const progress = Math.min(1, pull / 64);
+      const visible = pull > 0 || refreshing;
+      return (
+        <div className="ptr-wrap">
+          {visible && (
+            <div className="ptr-indicator" style={{ opacity: refreshing ? 1 : progress }}>
+              <div style={{ transform: `scale(${0.7 + progress * 0.3}) rotate(${refreshing ? 0 : progress * 360}deg)` }}>
+                {refreshing ? (
+                  <div style={{ width: 14, height: 14, border: '2px solid rgba(255,255,255,0.18)', borderTopColor: '#d4f57a', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
+                ) : (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d4f57a" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="6 9 12 15 18 9"/>
+                  </svg>
+                )}
+              </div>
+            </div>
+          )}
+          <div ref={scrollerRef} className="scroll-area"
+               onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+            {children}
+          </div>
+        </div>
+      );
+    }
+
+    function useReveal(threshold = 0.12) {
+      const ref = useRef(null);
+      const [visible, setVisible] = useState(false);
+      useEffect(() => {
+        if (!ref.current || visible) return;
+        const obs = new IntersectionObserver(([e]) => {
+          if (e.isIntersecting) { setVisible(true); obs.disconnect(); }
+        }, { threshold, rootMargin: '0px 0px -40px 0px' });
+        obs.observe(ref.current);
+        return () => obs.disconnect();
+      }, [visible, threshold]);
+      return [ref, visible];
+    }
+
+    function useCountUp(target, durationMs = 700, startWhen = true) {
+      const [val, setVal] = useState(0);
+      useEffect(() => {
+        if (!startWhen) return;
+        let raf, start;
+        const tick = (t) => {
+          if (!start) start = t;
+          const p = Math.min(1, (t - start) / durationMs);
+          // ease-out cubic
+          const eased = 1 - Math.pow(1 - p, 3);
+          setVal(Math.round(target * eased));
+          if (p < 1) raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(raf);
+      }, [target, durationMs, startWhen]);
+      return val;
+    }
 
     // ─── Supabase ────────────────────────────────────────────────────────────
     const SUPABASE_URL = 'https://usegniivddmbjkkceqcc.supabase.co';
@@ -1613,7 +1738,10 @@
     // ─── Records ─────────────────────────────────────────────────────────────
     function RecordsScreen({ onDetail }) {
       const [sessions, setSessions] = useState(null);
-      useEffect(() => { getSessions().then(setSessions).catch(() => setSessions([])); }, []);
+      const { setRefresh } = useContext(RefreshContext);
+      const reload = () => getSessions().then(setSessions).catch(() => setSessions([]));
+      useEffect(() => { reload(); }, []);
+      useEffect(() => { setRefresh(reload); return () => setRefresh(null); }, [setRefresh]);
       if (!sessions) return <div className="px-5 pt-10 text-center text-zinc-600 text-sm">読み込み中...</div>;
       const today = (sessions || []).filter(s => isToday(s.startedAt));
       const todayAvg = today.length ? Math.round(today.reduce((a,b)=>a+b.averageWorkScore,0)/today.length) : 0;
@@ -2103,9 +2231,12 @@
       const dateStr = new Date(item.session.endedAt || item.session.startedAt || item.created_at)
                         .toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' });
 
+      const [revealRef, revealed] = useReveal();
+      const score = useCountUp(item.session.averageWorkScore, 800, revealed);
+
       return (
         <>
-        <div className="relative rounded-3xl overflow-hidden shadow-2xl mb-4"
+        <div ref={revealRef} className={`relative rounded-3xl overflow-hidden shadow-2xl mb-4 reveal ${revealed ? 'in' : ''}`}
              style={{ aspectRatio: '4/5', background: '#08080b' }}>
           {/* Body — tappable for detail */}
           <div onClick={() => setDetailOpen(true)} className="absolute inset-0 cursor-pointer">
@@ -2154,7 +2285,7 @@
                 <div className="font-black tabular-nums leading-[0.82]"
                      style={{ fontSize: 'clamp(72px, 22vw, 96px)', color: c, letterSpacing: '-0.06em',
                               textShadow: photoUrl ? '0 4px 24px rgba(0,0,0,0.55)' : 'none' }}>
-                  {item.session.averageWorkScore}
+                  {score}
                 </div>
                 <div className="pb-1.5 min-w-0">
                   <div className="font-extrabold tracking-[2px] text-[9px] mb-1" style={{ color: c }}>{zone}</div>
@@ -2343,6 +2474,7 @@
       const [reactions, setReactions] = useState({}); // { sessionId: { emoji: { count, mine } } }
       const [loading, setLoading] = useState(true);
       const [sheetOpen, setSheetOpen] = useState(false);
+      const { setRefresh } = useContext(RefreshContext);
 
       const reload = () => {
         setLoading(true);
@@ -2358,6 +2490,7 @@
           .finally(() => setLoading(false));
       };
       useEffect(() => { reload(); }, []);
+      useEffect(() => { setRefresh(reload); return () => setRefresh(null); }, [setRefresh]);
 
       const handleReact = async (sessionId, ownerId, emoji, alreadyMine) => {
         // Optimistic update
@@ -2504,6 +2637,7 @@
       const [searchQ, setSearchQ] = useState('');
       const [searchRes, setSearchRes] = useState([]);
       const [searching, setSearching] = useState(false);
+      const { setRefresh } = useContext(RefreshContext);
 
       useEffect(() => {
         let mounted = true;
@@ -2511,12 +2645,14 @@
         return () => { mounted = false; };
       }, []);
 
-      useEffect(() => {
+      const reload = () => {
         setLoading(true);
-        getLeaderboard({ scope, metric, limit: 50 })
+        return getLeaderboard({ scope, metric, limit: 50 })
           .then(setRows)
           .finally(() => setLoading(false));
-      }, [scope, metric]);
+      };
+      useEffect(() => { reload(); }, [scope, metric]);
+      useEffect(() => { setRefresh(reload); return () => setRefresh(null); }, [setRefresh, scope, metric]);
 
       useEffect(() => {
         if (!searchQ.trim()) { setSearchRes([]); return; }
@@ -3553,6 +3689,9 @@
       const [recordsKey, setRecordsKey] = useState(0);
       const [resetSignal, setResetSignal] = useState(0);
       const [profileUserId, setProfileUserId] = useState(null);
+      const refreshFnRef = useRef(() => {});
+      const setRefresh = useCallback((fn) => { refreshFnRef.current = fn || (() => {}); }, []);
+      const handleRefresh = useCallback(() => refreshFnRef.current?.(), []);
 
       useEffect(() => {
         sb.auth.getSession().then(({ data }) => setAuthed(!!data.session));
@@ -3645,16 +3784,16 @@
       };
 
       return (
-        <>
-          <div className="scroll-area">
+        <RefreshContext.Provider value={{ setRefresh }}>
+          <PullToRefresh onRefresh={handleRefresh}>
             {renderTab()}
-          </div>
+          </PullToRefresh>
           <BottomNav tab={tab} onChange={handleTabChange} />
           {showOnboarding && <Onboarding onClose={closeOnboarding} />}
           {profileUserId && (
             <ProfileCardModal userId={profileUserId} onClose={() => setProfileUserId(null)} onChanged={() => setRecordsKey(k => k + 1)} />
           )}
-        </>
+        </RefreshContext.Provider>
       );
     }
 

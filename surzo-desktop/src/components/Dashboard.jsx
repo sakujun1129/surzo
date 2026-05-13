@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useReveal } from '../utils/hooks.js';
 import { fmtMin, fmtScore, isToday, scoreColor } from '../utils/format.js';
 import { CAT_ICON } from '../utils/categories.js';
 import { Card, PermissionBanner } from './ui.jsx';
@@ -9,18 +10,20 @@ function fmtPts(n) {
   return String(n);
 }
 
-function MiniRing({ avg, total, color }) {
+function MiniRing({ avg, total, color, animateOn = true }) {
   const r    = 42;
   const sw   = 7;
   const circ = 2 * Math.PI * r;
-  const fill = Math.min(avg / 100, 1) * circ;
+  const target = Math.min(avg / 100, 1) * circ;
+  const fill = animateOn ? target : 0;
   const label = fmtPts(total);
   return (
     <svg viewBox="0 0 104 104" width="90" height="90">
       <circle cx="52" cy="52" r={r} fill="none" stroke={color} strokeWidth={sw} strokeOpacity="0.13" />
       <circle cx="52" cy="52" r={r} fill="none" stroke={color} strokeWidth={sw}
         strokeDasharray={`${fill} ${circ}`} strokeLinecap="round"
-        transform="rotate(-90 52 52)" />
+        transform="rotate(-90 52 52)"
+        style={{ transition: 'stroke-dasharray 0.95s cubic-bezier(0.16,1,0.3,1)' }} />
       <text x="52" y="48" textAnchor="middle" dominantBaseline="middle"
         fontSize="22" fontWeight="900" fill={color} fontFamily="inherit" letterSpacing="-0.5">
         {label}
@@ -30,6 +33,41 @@ function MiniRing({ avg, total, color }) {
         avg {avg}
       </text>
     </svg>
+  );
+}
+
+function DashSessionCard({ session, accent, onTap }) {
+  const [ref, revealed] = useReveal();
+  return (
+    <button onClick={() => onTap?.(session)} ref={ref}
+      className={`text-left reveal ${revealed ? 'in' : ''}`}>
+      <div className="sz-card overflow-hidden relative" style={{ aspectRatio: '3/4' }}>
+        {session.photoUri?.startsWith('https://') ? (
+          <>
+            <img src={session.photoUri} alt="" className="absolute inset-0 w-full h-full object-cover"/>
+            <div className="absolute inset-0" style={{ background: 'linear-gradient(to bottom, transparent 40%, rgba(0,0,0,0.82) 100%)' }}/>
+            <div className="absolute bottom-0 left-0 right-0 px-2 pb-2.5">
+              <div className="font-black tabular-nums text-lg leading-none" style={{ color: accent }}>{fmtScore(calcTotal(session))}</div>
+              <div className="text-[9px] mt-0.5" style={{ color: accent + '88' }}>avg {session.averageWorkScore}</div>
+              <div className="text-[9px] font-semibold mt-1.5 truncate" style={{ color: 'rgba(255,255,255,0.7)' }}>{session.title}</div>
+              <div className="text-[8px] mt-0.5" style={{ color: 'rgba(255,255,255,0.38)' }}>
+                {isToday(session.startedAt) ? '今日' : new Date(session.startedAt).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })} · {fmtMin(session.durationMinutes)}
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="flex flex-col items-center justify-between px-2 pb-3 pt-5 h-full">
+            <MiniRing avg={session.averageWorkScore} total={calcTotal(session)} color={accent} animateOn={revealed} />
+            <div className="w-full text-center">
+              <div className="text-[11px] font-semibold leading-tight truncate" style={{ color: 'var(--text-sub)' }}>{session.title}</div>
+              <div className="text-[9px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                {isToday(session.startedAt) ? '今日' : new Date(session.startedAt).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })} · {fmtMin(session.durationMinutes)}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </button>
   );
 }
 
@@ -216,39 +254,9 @@ export default function Dashboard({ sessions, onQuickStart, onCustomStart, hasPe
           <>
             <div className="sz-lbl mb-3.5">記録</div>
             <div className="grid grid-cols-3 gap-2.5 flex-1 stagger">
-              {sorted.map(s => {
-                const accent = scoreColor(s.averageWorkScore);
-                return (
-                  <button key={s.id} onClick={() => onSessionDetail?.(s)} className="text-left">
-                    <div className="sz-card overflow-hidden relative" style={{ aspectRatio: '3/4' }}>
-                      {s.photoUri?.startsWith('https://') ? (
-                        <>
-                          <img src={s.photoUri} alt="" className="absolute inset-0 w-full h-full object-cover"/>
-                          <div className="absolute inset-0" style={{ background: 'linear-gradient(to bottom, transparent 40%, rgba(0,0,0,0.82) 100%)' }}/>
-                          <div className="absolute bottom-0 left-0 right-0 px-2 pb-2.5">
-                            <div className="font-black tabular-nums text-lg leading-none" style={{ color: accent }}>{fmtScore(calcTotal(s))}</div>
-                            <div className="text-[9px] mt-0.5" style={{ color: accent + '88' }}>avg {s.averageWorkScore}</div>
-                            <div className="text-[9px] font-semibold mt-1.5 truncate" style={{ color: 'rgba(255,255,255,0.7)' }}>{s.title}</div>
-                            <div className="text-[8px] mt-0.5" style={{ color: 'rgba(255,255,255,0.38)' }}>
-                              {isToday(s.startedAt) ? '今日' : new Date(s.startedAt).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })} · {fmtMin(s.durationMinutes)}
-                            </div>
-                          </div>
-                        </>
-                      ) : (
-                        <div className="flex flex-col items-center justify-between px-2 pb-3 pt-5 h-full">
-                          <MiniRing avg={s.averageWorkScore} total={calcTotal(s)} color={accent} />
-                          <div className="w-full text-center">
-                            <div className="text-[11px] font-semibold leading-tight truncate" style={{ color: 'var(--text-sub)' }}>{s.title}</div>
-                            <div className="text-[9px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                              {isToday(s.startedAt) ? '今日' : new Date(s.startedAt).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })} · {fmtMin(s.durationMinutes)}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
+              {sorted.map(s => (
+                <DashSessionCard key={s.id} session={s} accent={scoreColor(s.averageWorkScore)} onTap={onSessionDetail} />
+              ))}
             </div>
           </>
         ) : (

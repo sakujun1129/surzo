@@ -4,6 +4,7 @@ import {
   getFriendsList, getPendingRequests, getFriendsFeed,
   acceptFriendRequest, removeFriendship, searchUsersByName,
 } from '../utils/storage.js';
+import { useReveal, useCountUp } from '../utils/hooks.js';
 import { Card } from './ui.jsx';
 import ProfileCard from './ProfileCard.jsx';
 
@@ -192,9 +193,11 @@ function FeedItem({ user, session, created_at, onTapUser }) {
   const rgba = (rgb, a) => rgb.replace('rgb(', 'rgba(').replace(')', `,${a})`);
   const dateStr = new Date(session.endedAt || session.startedAt || created_at)
                     .toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' });
+  const [revealRef, revealed] = useReveal();
+  const animatedScore = useCountUp(session.averageWorkScore, 800, revealed);
 
   return (
-    <div className="relative rounded-3xl overflow-hidden shadow-2xl mb-4"
+    <div ref={revealRef} className={`relative rounded-3xl overflow-hidden shadow-2xl mb-4 reveal ${revealed ? 'in' : ''}`}
          style={{ aspectRatio: '4/5', background: '#08080b' }}>
       <img src={session.photoUri} className="absolute inset-0 w-full h-full object-cover" alt="" />
       <div className="absolute inset-0" style={{
@@ -234,7 +237,7 @@ function FeedItem({ user, session, created_at, onTapUser }) {
           <div className="font-black tabular-nums leading-[0.82]"
                style={{ fontSize: 'clamp(72px, 18vw, 110px)', color: c, letterSpacing: '-0.06em',
                         textShadow: '0 4px 24px rgba(0,0,0,0.55)' }}>
-            {session.averageWorkScore}
+            {animatedScore}
           </div>
           <div className="pb-1.5 min-w-0">
             <div className="font-extrabold tracking-[2px] text-[9px] mb-1" style={{ color: c }}>{zone}</div>
