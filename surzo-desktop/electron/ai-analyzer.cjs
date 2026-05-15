@@ -31,31 +31,47 @@ const CLASS_MAP = {
   E: { focusScore: 8,  distraction: 'high',   isOnTask: false }, // clear distraction
 };
 
-async function analyzeScreen(_imageBase64, sessionCategory, _apiKey, windowContext = '') {
+async function analyzeScreen(imageBase64, sessionCategory, _apiKey, windowContext = '') {
+  // Fallback: capture if caller didn't supply one
+  const image = imageBase64 || await captureScreen();
+
   const taskDesc = (sessionCategory === 'Free Work' || sessionCategory === 'General Work')
-    ? 'productive work (any professional or creative task — NOT entertainment, shopping, or social media)'
+    ? 'productive work (any professional, study, research, or creative task — NOT entertainment, shopping, or social media)'
     : sessionCategory;
-  const prompt = `Task: "${taskDesc}". Current window: ${windowContext}.
+
+  const prompt = image ? `Task: "${taskDesc}". Window context: ${windowContext}.
+
+Look at the actual screen content and judge how relevant it is to the task.
+A = Directly working on task (editing code/doc, the target tool actively in use)
+B = Useful reference (docs, tutorials, search results, articles, AI chats, research papers, code on GitHub — anything that supports the task)
+C = Loosely related (adjacent topic, might be useful)
+D = Off task (unrelated browsing, wrong app, personal email during deep work)
+E = Clear distraction (social media, video entertainment, shopping, news, gaming)
+
+Be generous with B: research, reading docs, learning material, AI assistants, and code repos all count as productive even when the title is unfamiliar. Only pick C–E if the content clearly isn't task-related. Reply with ONLY one letter.` : `Task: "${taskDesc}". Current window: ${windowContext}.
 
 How relevant is this window to the task? Reply with ONLY one letter:
-A = Directly working on task (correct app/site actively used)
-B = Useful reference (docs, tutorials, tools related to task)
-C = Loosely related (adjacent topic, might be useful)
-D = Off task (unrelated browsing, wrong app, email during deep work)
-E = Clear distraction (social media, entertainment, shopping, news)`;
+A = Directly working on task
+B = Useful reference (docs, tutorials, research, AI chat, code repo)
+C = Loosely related
+D = Off task
+E = Clear distraction (social, entertainment, shopping)`;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12000);
+  const timeout = setTimeout(() => controller.abort(), image ? 45000 : 12000);
+  const body = {
+    model: 'llama3.2-vision',
+    prompt,
+    stream: false,
+    options: { temperature: 0.1, num_predict: 4 },
+  };
+  if (image) body.images = [image];
+
   const res = await fetch('http://localhost:11434/api/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     signal: controller.signal,
-    body: JSON.stringify({
-      model: 'llama3.2-vision',
-      prompt,
-      stream: false,
-      options: { temperature: 0.1, num_predict: 4 },
-    }),
+    body: JSON.stringify(body),
   });
   clearTimeout(timeout);
 
@@ -66,7 +82,7 @@ E = Clear distraction (social media, entertainment, shopping, news)`;
   const siteMatch = windowContext.match(/site="([^"]+)"/);
   const appMatch  = windowContext.match(/app="([^"]+)"/);
   const topApp = (siteMatch || appMatch || [])[1] || '';
-  return { ...result, topApp, note: `Class ${letter}` };
+  return { ...result, topApp, note: `Class ${letter}${image ? ' (vision)' : ''}` };
 }
 
 module.exports = { captureScreen, analyzeScreen };

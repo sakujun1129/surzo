@@ -84,8 +84,43 @@ function getActiveWindow() {
 const BROWSERS = new Set(['Google Chrome','Safari','Firefox','Arc','Brave Browser','Microsoft Edge','Chromium']);
 
 // Sites with deterministic scores — AI not needed, saves time and avoids hallucination
+// Order matters: more specific keys (e.g. 'google scholar') must precede looser ones.
 const KNOWN_SITES = {
-  // Hard distractions (0-14)
+  // ─── Productive: docs, dev, research, learning (70-90) ───
+  'developer.mozilla': { focusScore: 88, distraction: 'none', isOnTask: true },
+  mdn:                 { focusScore: 88, distraction: 'none', isOnTask: true },
+  'stack overflow':    { focusScore: 85, distraction: 'none', isOnTask: true },
+  stackoverflow:       { focusScore: 85, distraction: 'none', isOnTask: true },
+  'github.com':        { focusScore: 85, distraction: 'none', isOnTask: true },
+  github:              { focusScore: 82, distraction: 'none', isOnTask: true },
+  gitlab:              { focusScore: 82, distraction: 'none', isOnTask: true },
+  'developer.apple':   { focusScore: 85, distraction: 'none', isOnTask: true },
+  'learn.microsoft':   { focusScore: 85, distraction: 'none', isOnTask: true },
+  'react.dev':         { focusScore: 85, distraction: 'none', isOnTask: true },
+  'nextjs.org':        { focusScore: 85, distraction: 'none', isOnTask: true },
+  'vercel.com':        { focusScore: 80, distraction: 'none', isOnTask: true },
+  'supabase':          { focusScore: 82, distraction: 'none', isOnTask: true },
+  'docs.':             { focusScore: 82, distraction: 'none', isOnTask: true },
+  'npmjs':             { focusScore: 80, distraction: 'none', isOnTask: true },
+  pypi:                { focusScore: 80, distraction: 'none', isOnTask: true },
+  'crates.io':         { focusScore: 80, distraction: 'none', isOnTask: true },
+  arxiv:               { focusScore: 85, distraction: 'none', isOnTask: true },
+  'google scholar':    { focusScore: 85, distraction: 'none', isOnTask: true },
+  pubmed:              { focusScore: 85, distraction: 'none', isOnTask: true },
+  'researchgate':      { focusScore: 82, distraction: 'none', isOnTask: true },
+  wikipedia:           { focusScore: 78, distraction: 'none', isOnTask: true },
+  zenn:                { focusScore: 82, distraction: 'none', isOnTask: true },
+  qiita:               { focusScore: 82, distraction: 'none', isOnTask: true },
+  'docs.google':       { focusScore: 80, distraction: 'none', isOnTask: true },
+  'notion.so':         { focusScore: 78, distraction: 'none', isOnTask: true },
+  notion:              { focusScore: 78, distraction: 'none', isOnTask: true },
+  // AI tools (treated as productive assistants)
+  chatgpt:             { focusScore: 75, distraction: 'none', isOnTask: true },
+  'claude.ai':         { focusScore: 78, distraction: 'none', isOnTask: true },
+  gemini:              { focusScore: 75, distraction: 'none', isOnTask: true },
+  perplexity:          { focusScore: 82, distraction: 'none', isOnTask: true },
+  'anthropic':         { focusScore: 75, distraction: 'none', isOnTask: true },
+  // ─── Hard distractions (0-14) ───
   youtube: { focusScore: 8,  distraction: 'high',   isOnTask: false },
   netflix: { focusScore: 5,  distraction: 'high',   isOnTask: false },
   tiktok:  { focusScore: 5,  distraction: 'high',   isOnTask: false },
@@ -131,6 +166,13 @@ function extractSiteName(title) {
 
 function lookupKnownSite(siteName, title) {
   const text = `${siteName} ${title}`.toLowerCase();
+  // Pass 1: distractions/penalties win first (so "GitHub Tutorial - YouTube" → YouTube)
+  for (const [key, val] of Object.entries(KNOWN_SITES)) {
+    if (val.distraction !== 'none' && text.includes(key)) {
+      return { ...val, topApp: key, note: `Known: ${key}` };
+    }
+  }
+  // Pass 2: productive matches
   for (const [key, val] of Object.entries(KNOWN_SITES)) {
     if (text.includes(key)) return { ...val, topApp: key, note: `Known: ${key}` };
   }
@@ -192,12 +234,12 @@ function buildWindowContext(app, title) {
 // ─── Scoring (inline — mirrors src/utils/scoring.js for main-process use) ────
 
 const CATEGORY_APPS = {
-  Programming:    ['code', 'visual studio code', 'xcode', 'terminal', 'iterm', 'cursor', 'nova', 'intellij', 'webstorm', 'pycharm', 'android studio', 'zed', 'sublime'],
+  Programming:    ['code', 'visual studio code', 'xcode', 'terminal', 'iterm', 'cursor', 'nova', 'intellij', 'webstorm', 'pycharm', 'android studio', 'zed', 'sublime', 'safari', 'chrome', 'firefox', 'arc', 'brave', 'edge'],
   Writing:        ['word', 'pages', 'notion', 'obsidian', 'bear', 'ulysses', 'scrivener', 'typora', 'ia writer'],
   Design:         ['figma', 'sketch', 'photoshop', 'illustrator', 'affinity', 'canva', 'xd'],
   Research:       ['safari', 'chrome', 'firefox', 'arc', 'brave', 'edge', 'opera'],
   'Video Editing':['final cut', 'davinci', 'premiere', 'imovie', 'after effects', 'resolve'],
-  Study:          ['anki', 'notion', 'obsidian', 'bear', 'preview', 'kindle', 'goodreader'],
+  Study:          ['anki', 'notion', 'obsidian', 'bear', 'preview', 'kindle', 'goodreader', 'safari', 'chrome', 'firefox', 'arc', 'brave', 'edge'],
   'Admin / Email':['mail', 'outlook', 'spark', 'slack', 'teams', 'zoom', 'calendar', 'numbers', 'excel', 'sheets'],
   'Free Work':    [],
 };
@@ -843,10 +885,15 @@ function startAiAnalysis() {
       const nativeScore = currentWin && !BROWSERS.has(currentWin.app)
         ? scoreNativeApp(currentWin.app, sessionState.sessionData.category) : null;
 
-      const analysis = knownSite || nativeScore
-        || await analyzeScreen(null, sessionState.sessionData.category, config.apiKey, windowContext);
+      let analysis = knownSite || nativeScore;
+      if (!analysis) {
+        // Fall back to vision AI — capture screen so the model can judge content,
+        // not just the window title
+        const image = await captureScreen();
+        analysis = await analyzeScreen(image, sessionState.sessionData.category, config.apiKey, windowContext);
+      }
       sessionState.aiAnalyses.push({ timestamp: Date.now(), ...analysis });
-      console.log('[AI]', JSON.stringify({ ms: Date.now()-t0, topApp: analysis.topApp, focusScore: analysis.focusScore, distraction: analysis.distraction }));
+      console.log('[AI]', JSON.stringify({ ms: Date.now()-t0, topApp: analysis.topApp, focusScore: analysis.focusScore, distraction: analysis.distraction, note: analysis.note }));
       mainWindow.webContents.send('ai:analysis', analysis);
     } catch (err) {
       console.log('[AI:ERR]', err.message);
