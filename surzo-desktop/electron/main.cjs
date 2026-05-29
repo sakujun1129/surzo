@@ -6,7 +6,7 @@ const fs    = require('fs');
 const https = require('https');
 const { execFile, spawn } = require('child_process');
 const { loadConfig, saveConfig } = require('./config.cjs');
-const { captureScreen, analyzeScreen } = require('./ai-analyzer.cjs');
+const { captureScreen, analyzeScreen, unloadModel } = require('./ai-analyzer.cjs');
 const QRCode = require('qrcode');
 
 const isDev     = process.env.NODE_ENV === 'development';
@@ -62,11 +62,18 @@ function getActiveWindow() {
           '-e', 'end tell',
         ];
       } else {
+        // AXFocusedWindow is reported correctly for native fullscreen apps (which
+        // live on their own Space), where `first window` often comes back empty.
+        // Fall back to the first window, then to the app name so the title is never blank.
         script2 = [
           '-e', 'tell application "System Events"',
           '-e', `set fp to first application process whose name is "${appName}"`,
+          '-e', 'try',
+          '-e', 'set t to value of attribute "AXTitle" of (value of attribute "AXFocusedWindow" of fp)',
+          '-e', 'if t is not missing value and t is not "" then return t',
+          '-e', 'end try',
           '-e', 'if (count windows of fp) > 0 then return name of first window of fp',
-          '-e', 'return ""',
+          '-e', `return "${appName}"`,
           '-e', 'end tell',
         ];
       }
@@ -75,6 +82,30 @@ function getActiveWindow() {
         const title = (!err2 && titleOut) ? titleOut.trim() : '';
         resolve({ app: appName, title });
       });
+    });
+  });
+}
+
+// Bounds of the frontmost window (screen coords) — used to crop the AI vision
+// capture to just the active window instead of the full screen.
+function getActiveWindowBounds() {
+  return new Promise((resolve) => {
+    execFile('osascript', [
+      '-e', 'tell application "System Events"',
+      '-e', 'set fp to first application process whose frontmost is true',
+      '-e', 'if (count windows of fp) is 0 then return ""',
+      '-e', 'set w to first window of fp',
+      '-e', 'set {x, y} to position of w',
+      '-e', 'set {ww, hh} to size of w',
+      '-e', 'return (x as text) & "," & (y as text) & "," & (ww as text) & "," & (hh as text)',
+      '-e', 'end tell',
+    ], { timeout: 2000 }, (err, out) => {
+      if (err || !out) { resolve(null); return; }
+      const parts = out.trim().split(',').map(Number);
+      if (parts.length !== 4 || parts.some(Number.isNaN)) { resolve(null); return; }
+      const [x, y, w, h] = parts;
+      if (w < 50 || h < 50) { resolve(null); return; }
+      resolve({ x, y, w, h });
     });
   });
 }
@@ -111,7 +142,16 @@ const KNOWN_SITES = {
   wikipedia:           { focusScore: 78, distraction: 'none', isOnTask: true },
   zenn:                { focusScore: 82, distraction: 'none', isOnTask: true },
   qiita:               { focusScore: 82, distraction: 'none', isOnTask: true },
-  'docs.google':       { focusScore: 80, distraction: 'none', isOnTask: true },
+  // Google Workspace — browser window titles read "Name - Google Docs - Chrome",
+  // so we match the title form ("google docs"), not just the docs.google URL.
+  // Scored on par with native code editors (88) so writing isn't under-valued.
+  'docs.google':       { focusScore: 88, distraction: 'none', isOnTask: true },
+  'google docs':       { focusScore: 88, distraction: 'none', isOnTask: true },
+  'google ドキュメント': { focusScore: 88, distraction: 'none', isOnTask: true },
+  'google sheets':     { focusScore: 85, distraction: 'none', isOnTask: true },
+  'google スプレッドシート': { focusScore: 85, distraction: 'none', isOnTask: true },
+  'google slides':     { focusScore: 85, distraction: 'none', isOnTask: true },
+  'google スライド':    { focusScore: 85, distraction: 'none', isOnTask: true },
   'notion.so':         { focusScore: 78, distraction: 'none', isOnTask: true },
   notion:              { focusScore: 78, distraction: 'none', isOnTask: true },
   // AI tools (treated as productive assistants)
@@ -861,6 +901,17 @@ async function probePermission() {
 }
 
 let aiRunning = false;
+// Cache last vision analysis to skip redundant model calls when the user
+// stays on the same window. Keyed by `${app}::${title}`.
+let lastVisionKey    = '';
+let lastVisionResult = null;
+let lastVisionAt     = 0;
+const VISION_CACHE_MS = 90_000;
+// Floor between actual Ollama vision calls. The model inference is the heaviest
+// thing this app does (CPU/GPU spikes cause input lag + audio dropouts), so cap
+// it: screen-content judgement runs at most this often. Cheap known-site / native
+// app scoring and the keyboard/mouse activity engine keep running every tick.
+const VISION_MIN_INTERVAL_MS = 60_000;
 
 function startAiAnalysis() {
   if (aiTimer) return;
@@ -886,26 +937,47 @@ function startAiAnalysis() {
         ? scoreNativeApp(currentWin.app, sessionState.sessionData.category) : null;
 
       let analysis = knownSite || nativeScore;
+      let cacheHit = false;
       if (!analysis) {
-        // Fall back to vision AI — capture screen so the model can judge content,
-        // not just the window title
-        const image = await captureScreen();
-        analysis = await analyzeScreen(image, sessionState.sessionData.category, config.apiKey, windowContext);
+        // 3) Vision — only run the model when the window changed or the per-window
+        //    cache is stale, AND never more often than VISION_MIN_INTERVAL_MS.
+        //    When we skip, leave analysis null: the activity/distraction pattern
+        //    engine scores the window until vision catches up.
+        const key = currentWin ? `${currentWin.app}::${currentWin.title}` : '';
+        const sameWindow         = key && key === lastVisionKey;
+        const elapsedSinceVision = Date.now() - lastVisionAt;
+        if (sameWindow && lastVisionResult && elapsedSinceVision < VISION_CACHE_MS) {
+          analysis = lastVisionResult;
+          cacheHit = true;
+        } else if (elapsedSinceVision >= VISION_MIN_INTERVAL_MS) {
+          // Crop to active window bounds — far lighter than full-screen capture
+          const bounds = await getActiveWindowBounds();
+          const image  = await captureScreen(bounds);
+          analysis = await analyzeScreen(image, sessionState.sessionData.category, config.apiKey, windowContext);
+          lastVisionKey    = key;
+          lastVisionResult = analysis;
+          lastVisionAt     = Date.now();
+        }
       }
-      sessionState.aiAnalyses.push({ timestamp: Date.now(), ...analysis });
-      console.log('[AI]', JSON.stringify({ ms: Date.now()-t0, topApp: analysis.topApp, focusScore: analysis.focusScore, distraction: analysis.distraction, note: analysis.note }));
-      mainWindow.webContents.send('ai:analysis', analysis);
+      if (analysis) {
+        sessionState.aiAnalyses.push({ timestamp: Date.now(), ...analysis });
+        console.log('[AI]', JSON.stringify({ ms: Date.now()-t0, cacheHit, topApp: analysis.topApp, focusScore: analysis.focusScore, distraction: analysis.distraction, note: analysis.note }));
+        mainWindow.webContents.send('ai:analysis', analysis);
+      }
     } catch (err) {
       console.log('[AI:ERR]', err.message);
       mainWindow.webContents.send('ai:error', err.message);
     } finally {
       aiRunning = false;
     }
-  }, 4000);
+  }, 6000);
 }
 
 function stopAiAnalysis() {
   if (aiTimer) { clearInterval(aiTimer); aiTimer = null; }
+  lastVisionKey    = '';
+  lastVisionResult = null;
+  lastVisionAt     = 0;
 }
 
 function startTracking() {
@@ -925,15 +997,37 @@ function startTracking() {
     const isActive      = idleSecs < 3;
     const likelyTyping  = isActive && !cursorMoved;
 
+    // Auto-clear a stale phone-distraction flag. The mobile app marks "phone in use"
+    // when it backgrounds, but a matching "returned" event can be lost (app closed,
+    // phone locked, never re-opened) — which would floor the score forever. Active PC
+    // input means the user is at the keyboard, not on their phone, so clear it; also
+    // cap any single phone event at 90s so a missing return can't sink the session.
+    if (sessionState.activePhoneEvent) {
+      const phoneSecs = (now - sessionState.activePhoneEvent.startedAt) / 1000;
+      if (idleSecs < 3 || phoneSecs > 90) {
+        sessionState.phoneEvents.push({
+          ...sessionState.activePhoneEvent,
+          endedAt: now,
+          durationSeconds: Math.round(phoneSecs),
+        });
+        sessionState.activePhoneEvent = null;
+      }
+    }
+
     let win = null;
     if (idleSecs < 30) {
       const lastIdle = sessionState.idleEvents[sessionState.idleEvents.length - 1];
       if (lastIdle && !lastIdle.endedAt) lastIdle.endedAt = now;
 
-      win = await getActiveWindow();
-      if (!sessionState) return;
-      // Skip our own Electron windows — prevents widget/alert focus from inflating score
-      if (win && win.app !== 'Electron') sessionState.windowEvents.push({ ...win, timestamp: now, idleSecs });
+      // Window lookup spawns osascript (and pokes the frontmost browser) — only do it
+      // every other tick (~2s) to halve that load. The 1s tick still drives the timer
+      // and the cheap keyboard/mouse/idle activity sampling below.
+      if (tickCount % 2 === 0) {
+        win = await getActiveWindow();
+        if (!sessionState) return;
+        // Skip our own Electron windows — prevents widget/alert focus from inflating score
+        if (win && win.app !== 'Electron') sessionState.windowEvents.push({ ...win, timestamp: now, idleSecs });
+      }
     } else {
       const lastIdle = sessionState.idleEvents[sessionState.idleEvents.length - 1];
       if (!lastIdle || lastIdle.endedAt) {
@@ -1138,7 +1232,7 @@ async function pollNowPlaying() {
 function startNowPlayingPoller() {
   if (nowPlayingPollTimer) return;
   pollNowPlaying();
-  nowPlayingPollTimer = setInterval(pollNowPlaying, 4000);
+  nowPlayingPollTimer = setInterval(pollNowPlaying, 8000);
 }
 
 function stopNowPlayingPoller() {
@@ -1204,6 +1298,15 @@ ipcMain.handle('session:start', async (_, data) => {
   };
   startTracking();
   return { ok: true };
+});
+
+// Renderer state (which screen to show) lives only in React memory, so a window
+// reload/recreate drops back to the dashboard even though the main process is
+// still tracking (the widget keeps showing the session). The renderer calls this
+// on mount to re-hydrate the active session and jump straight back to the live view.
+ipcMain.handle('session:get', () => {
+  if (!sessionState || !aiTimer) return null;
+  return sessionState.sessionData;
 });
 
 ipcMain.handle('session:end', async () => {
@@ -1575,6 +1678,17 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+// On quit, free the Ollama vision model from RAM right away instead of letting it
+// sit for the 20m keep_alive window after Surzo is gone. Defer the actual quit
+// briefly so the unload request can reach Ollama before the process exits.
+let quitCleanupDone = false;
+app.on('before-quit', (e) => {
+  if (quitCleanupDone) return;
+  e.preventDefault();
+  quitCleanupDone = true;
+  unloadModel().finally(() => app.quit());
 });
 
 app.on('activate', () => {

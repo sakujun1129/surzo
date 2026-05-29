@@ -4,14 +4,17 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-async function captureScreen() {
+async function captureScreen(bounds) {
   const tmpFile = path.join(os.tmpdir(), `surzo_${Date.now()}.png`);
   return new Promise((resolve) => {
-    // Capture full screen silently (-x = no sound)
-    execFile('screencapture', ['-x', tmpFile], (err) => {
+    // If bounds {x,y,w,h} supplied → crop foreground window only (much lighter).
+    // Otherwise full-screen capture.
+    const args = (bounds && bounds.w > 50 && bounds.h > 50)
+      ? ['-x', '-R', `${bounds.x},${bounds.y},${bounds.w},${bounds.h}`, tmpFile]
+      : ['-x', tmpFile];
+    execFile('screencapture', args, (err) => {
       if (err) { resolve(null); return; }
-      // Resize to max 1024px wide to reduce token cost
-      execFile('sips', ['-Z', '512', tmpFile], () => {
+      execFile('sips', ['-Z', '384', tmpFile], () => {
         try {
           const data = fs.readFileSync(tmpFile);
           try { fs.unlinkSync(tmpFile); } catch {}
@@ -60,9 +63,14 @@ E = Clear distraction (social, entertainment, shopping)`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), image ? 45000 : 12000);
   const body = {
-    model: 'llama3.2-vision',
+    model: 'moondream',
     prompt,
     stream: false,
+    // keep_alive holds the model resident between calls so we never pay the cold
+    // reload (~40s of sustained GPU load = system-wide stutter/fan). num_predict
+    // stays at 4: moondream's first token is often whitespace, so 1 returns blank
+    // and silently falls back to the "off task" class.
+    keep_alive: '20m',
     options: { temperature: 0.1, num_predict: 4 },
   };
   if (image) body.images = [image];
@@ -85,4 +93,24 @@ E = Clear distraction (social, entertainment, shopping)`;
   return { ...result, topApp, note: `Class ${letter}${image ? ' (vision)' : ''}` };
 }
 
-module.exports = { captureScreen, analyzeScreen };
+// Tell Ollama to drop the vision model from memory immediately (keep_alive: 0).
+// Called on app quit so the ~1.8GB model doesn't linger in RAM for the 20m
+// keep_alive window after Surzo is gone. Fire-and-forget with a short timeout.
+async function unloadModel() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1000);
+  try {
+    await fetch('http://localhost:11434/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({ model: 'moondream', keep_alive: 0 }),
+    });
+  } catch (_e) {
+    // ollama not running / already unloaded — nothing to clean up
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+module.exports = { captureScreen, analyzeScreen, unloadModel };

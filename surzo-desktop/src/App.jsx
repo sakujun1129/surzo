@@ -94,6 +94,16 @@ export default function App() {
     setScreen('result');
   };
 
+  // Re-hydrate the live view after a window reload/recreate. The main process
+  // keeps tracking (and the widget keeps showing the session) even when React
+  // state resets to the dashboard, so ask it whether a session is in progress
+  // and jump straight back to ActiveSession if so.
+  useEffect(() => {
+    window.electronAPI?.getActiveSession?.().then((data) => {
+      if (data) { setSessionData(data); setScreen('active'); }
+    }).catch(() => {});
+  }, []);
+
   // Keep html.dark class in sync with theme state
   useEffect(() => {
     if (theme === 'dark') document.documentElement.classList.add('dark');

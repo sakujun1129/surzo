@@ -47,8 +47,8 @@ function PhoneIcon() {
   );
 }
 
-const HOLD_MS        = 260;  // press duration to enter drag mode
-const MOVE_THRESHOLD = 8;    // px movement during press → drag immediately
+const HOLD_MS        = 200;  // press duration to enter drag mode (shorter = a deliberate "grab" won't count as a tap)
+const MOVE_THRESHOLD = 6;    // px movement during press → drag immediately
 
 export default function Widget() {
   const [update, setUpdate]     = useState({ elapsed: 0, liveScore: 50, targetScore: null });
@@ -207,9 +207,11 @@ export default function Widget() {
     syncMouseIgnore();
   };
   const handlePillLeave = () => {
+    // Cursor left the pill while still pressed → the user is dragging it away.
+    // Treat as a drag (never a tap) so moving the widget can't open the main window.
     if (!draggingRef.current && !longPressedRef.current && pressStartRef.current) {
       if (holdTimerRef.current) { clearTimeout(holdTimerRef.current); holdTimerRef.current = null; }
-      pressStartRef.current = 0;
+      enterDragMode();
     }
     pillHoverRef.current = false;
     syncMouseIgnore();

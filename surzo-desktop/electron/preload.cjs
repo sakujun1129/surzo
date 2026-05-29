@@ -4,6 +4,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Session lifecycle
   startSession: (data) => ipcRenderer.invoke('session:start', data),
   endSession:   ()     => ipcRenderer.invoke('session:end'),
+  // Returns the in-progress session's data (with startedAt) if tracking, else null.
+  // Lets the renderer restore the live view after a reload instead of showing dashboard.
+  getActiveSession: () => ipcRenderer.invoke('session:get'),
 
   // Phone events (logged from UI buttons)
   phoneCheckStart: ()   => ipcRenderer.invoke('phone:start'),
